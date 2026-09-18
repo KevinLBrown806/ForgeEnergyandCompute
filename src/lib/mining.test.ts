@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   btcPerThPerDay,
+  computeMinerEconomics,
   computeMining,
   summarizeFleet,
   type FleetContext,
@@ -111,5 +112,39 @@ describe('summarizeFleet', () => {
       6,
     );
     expect(s.breakevenBtcPrice).toBeCloseTo(36_000, 3);
+  });
+});
+
+describe('computeMinerEconomics', () => {
+  const ctx: FleetContext = {
+    btcPriceUsd: 60_000,
+    btcPerThPerDay: 1e-6,
+    poolFeePct: 0,
+    uptimePct: 1,
+    electricityRatePerKwh: 0.05,
+  };
+
+  it('marks online miners as active', () => {
+    const line = computeMinerEconomics(
+      { id: 'a', model: 'A', quantity: 10, hashrateTh: 100, watts: 3000, status: 'online' },
+      ctx,
+    );
+    expect(line.active).toBe(true);
+    expect(line.totalHashrateTh).toBe(1000);
+  });
+
+  it('marks provisioning miners as inactive', () => {
+    const line = computeMinerEconomics(
+      {
+        id: 'b',
+        model: 'B',
+        quantity: 5,
+        hashrateTh: 100,
+        watts: 3000,
+        status: 'provisioning',
+      },
+      ctx,
+    );
+    expect(line.active).toBe(false);
   });
 });

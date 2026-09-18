@@ -6,6 +6,7 @@ import {
   formatPowerKw,
   formatUsd,
   formatUsdCompact,
+  formatUsdPerKwh,
 } from './format';
 
 describe('formatUsd', () => {
@@ -22,6 +23,11 @@ describe('formatUsdCompact', () => {
 
   it('uses whole dollars below a thousand', () => {
     expect(formatUsdCompact(750)).toBe('$750');
+  });
+
+  it('places the minus sign before the dollar sign', () => {
+    expect(formatUsdCompact(-125_900)).toBe('-$125.9K');
+    expect(formatUsdCompact(-2_720_000)).toBe('-$2.72M');
   });
 });
 
@@ -49,5 +55,11 @@ describe('formatPowerKw', () => {
 describe('formatPercent', () => {
   it('formats a fraction as a percentage', () => {
     expect(formatPercent(0.662)).toBe('66.2%');
+  });
+});
+
+describe('formatUsdPerKwh', () => {
+  it('formats a three-decimal electricity rate', () => {
+    expect(formatUsdPerKwh(0.045)).toBe('$0.045/kWh');
   });
 });

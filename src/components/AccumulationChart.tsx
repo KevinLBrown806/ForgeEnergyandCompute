@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import type { AccumulationPoint } from '../config/forge.config';
+import { chartYMax } from '../lib/chart';
 import { formatBtc } from '../lib/format';
 
 interface AccumulationChartProps {
@@ -9,7 +10,7 @@ interface AccumulationChartProps {
 
 const W = 640;
 const H = 240;
-const PAD = { top: 16, right: 16, bottom: 28, left: 44 };
+const PAD = { top: 16, right: 40, bottom: 28, left: 44 };
 
 export function AccumulationChart({ data, targetBtc }: AccumulationChartProps) {
   const gradientId = useId();
@@ -21,8 +22,11 @@ export function AccumulationChart({ data, targetBtc }: AccumulationChartProps) {
   const innerW = W - PAD.left - PAD.right;
   const innerH = H - PAD.top - PAD.bottom;
 
-  const maxBtc = Math.max(...data.map((d) => d.btc), targetBtc ?? 0);
-  const yMax = Math.ceil(maxBtc / 50) * 50 || 50;
+  const dataMax = Math.max(...data.map((d) => d.btc));
+  // Only draw the long-term target on-plot when it would not flatten the series.
+  const includeTarget =
+    targetBtc !== undefined && targetBtc > 0 && targetBtc <= dataMax * 1.6;
+  const yMax = chartYMax(includeTarget && targetBtc ? Math.max(dataMax, targetBtc) : dataMax);
 
   const x = (i: number) =>
     PAD.left + (data.length === 1 ? innerW / 2 : (i / (data.length - 1)) * innerW);
@@ -49,8 +53,8 @@ export function AccumulationChart({ data, targetBtc }: AccumulationChartProps) {
     >
       <defs>
         <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor="var(--btc)" stopOpacity="0.35" />
-          <stop offset="100%" stopColor="var(--btc)" stopOpacity="0" />
+          <stop offset="0%" stopColor="currentColor" stopOpacity="0.28" />
+          <stop offset="100%" stopColor="currentColor" stopOpacity="0" />
         </linearGradient>
       </defs>
 
@@ -69,7 +73,7 @@ export function AccumulationChart({ data, targetBtc }: AccumulationChartProps) {
         </g>
       ))}
 
-      {targetBtc !== undefined && targetBtc <= yMax && (
+      {includeTarget && targetBtc !== undefined && (
         <line
           x1={PAD.left}
           x2={W - PAD.right}
@@ -79,10 +83,11 @@ export function AccumulationChart({ data, targetBtc }: AccumulationChartProps) {
         />
       )}
 
-      <path d={areaPath} fill={`url(#${gradientId})`} />
-      <path d={linePath} className="chart__line" fill="none" />
-
-      <circle cx={x(data.length - 1)} cy={y(last.btc)} r={4} className="chart__dot" />
+      <g className="chart__series">
+        <path d={areaPath} fill={`url(#${gradientId})`} />
+        <path d={linePath} className="chart__line" fill="none" />
+        <circle cx={x(data.length - 1)} cy={y(last.btc)} r={4} className="chart__dot" />
+      </g>
 
       {data.map((d, i) =>
         i % 2 === 0 || i === data.length - 1 ? (

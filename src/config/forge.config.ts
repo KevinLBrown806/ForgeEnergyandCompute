@@ -3,12 +3,12 @@
  *
  * This is the single source of truth for all figures shown on the dashboard.
  * Edit values here to change BTC holdings, miner quantities, electricity
- * prices, capital allocation, etc. UI components never hard-code data — they
- * read it from this file (and derive figures via the pure logic in `src/lib`).
+ * prices, capital allocation, etc. UI components never hard-code business
+ * figures — they read this file and derive the rest via `src/lib`.
  *
  * When a real backend/API is added later, replace the exported values below
- * with fetched data of the same shape; the calculation modules and UI will not
- * need to change.
+ * with fetched data of the same shape; the calculation modules and UI will
+ * not need to change.
  */
 
 export type MinerStatus = 'online' | 'provisioning' | 'offline';
@@ -51,6 +51,12 @@ export interface RoadmapStep {
   title: string;
   status: RoadmapStatus;
 }
+
+/** Presentation metadata — not used in calculations. */
+export const meta = {
+  asOfLabel: "Jan '26",
+  dataMode: 'Mock data',
+} as const;
 
 /** Market and network assumptions that drive the mining economics. */
 export const market = {
@@ -101,8 +107,8 @@ export const treasury = {
 } as const;
 
 /**
- * Mining fleet. Add or edit miners here — the fleet table and all overview
- * aggregates are derived from this array.
+ * Mining fleet. Add or edit miners here — the fleet table, cards, and all
+ * overview aggregates are derived from this array.
  */
 export const fleet: MinerModel[] = [
   {
@@ -147,13 +153,20 @@ export const energy = {
   ] satisfies EnergySource[],
 } as const;
 
-/** Capital allocation. Percentages should sum to 1. */
-export const capitalAllocation: AllocationSlice[] = [
-  { label: 'Bitcoin', pct: 0.45 },
-  { label: 'Mining hardware', pct: 0.3 },
-  { label: 'Energy infrastructure', pct: 0.15 },
-  { label: 'Cash / dry powder', pct: 0.1 },
-];
+/**
+ * Capital allocation. Edit `totalUsd` and the slice percentages here —
+ * the donut, legend, and dollar figures all derive from this object.
+ * Percentages should sum to 1.
+ */
+export const capital = {
+  totalUsd: 8_000_000,
+  slices: [
+    { label: 'Bitcoin', pct: 0.45 },
+    { label: 'Mining hardware', pct: 0.3 },
+    { label: 'Energy infrastructure', pct: 0.15 },
+    { label: 'Cash / dry powder', pct: 0.1 },
+  ] satisfies AllocationSlice[],
+};
 
 /** The Forge flywheel, top to bottom. */
 export const flywheel: string[] = [

@@ -21,13 +21,19 @@ export function formatUsdPrecise(value: number): string {
   return usd2.format(value);
 }
 
-/** Compact currency, e.g. $2.7M, $1.3B. Falls back to whole dollars < 1000. */
+/** Compact currency, e.g. $2.7M, -$125.9K. Falls back to whole dollars < 1000. */
 export function formatUsdCompact(value: number): string {
   const abs = Math.abs(value);
-  if (abs >= 1_000_000_000) return `$${(value / 1_000_000_000).toFixed(2)}B`;
-  if (abs >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (abs >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
+  const sign = value < 0 ? '-' : '';
+  if (abs >= 1_000_000_000) return `${sign}$${(abs / 1_000_000_000).toFixed(2)}B`;
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`;
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
   return formatUsd(value);
+}
+
+/** Electricity rate display, e.g. $0.045 / kWh. */
+export function formatUsdPerKwh(value: number): string {
+  return `$${value.toFixed(3)}/kWh`;
 }
 
 export function formatNumber(value: number, maximumFractionDigits = 0): string {
