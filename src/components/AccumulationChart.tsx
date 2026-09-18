@@ -10,7 +10,7 @@ interface AccumulationChartProps {
 
 const W = 640;
 const H = 240;
-const PAD = { top: 16, right: 16, bottom: 28, left: 44 };
+const PAD = { top: 16, right: 40, bottom: 28, left: 44 };
 
 export function AccumulationChart({ data, targetBtc }: AccumulationChartProps) {
   const gradientId = useId();
