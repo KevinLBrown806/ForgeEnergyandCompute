@@ -117,13 +117,19 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ForgeEnv {
     );
   }
 
-  // Cross-origin Netlify → Render needs SameSite=None; Secure.
-  // Local Vite proxy is same-origin, so Lax is fine.
-  const crossOrigin = corsOrigins.some(
-    (o) => !o.includes('localhost') && !o.includes('127.0.0.1'),
-  );
-  const cookieSecure = isProduction || crossOrigin;
-  const cookieSameSite: 'lax' | 'none' = crossOrigin ? 'none' : 'lax';
+  // Primary production path: Netlify same-origin /api proxy → SameSite=Lax + Secure.
+  // Opt into SameSite=None only for direct cross-origin browser→Render testing.
+  const sameSiteRaw = env.FORGE_COOKIE_SAMESITE?.trim().toLowerCase();
+  let cookieSameSite: 'lax' | 'none' = 'lax';
+  if (sameSiteRaw === 'none') {
+    cookieSameSite = 'none';
+  } else if (sameSiteRaw === 'lax' || sameSiteRaw == null || sameSiteRaw === '') {
+    cookieSameSite = 'lax';
+  } else {
+    throw new Error('FORGE_COOKIE_SAMESITE must be "lax" or "none"');
+  }
+  // SameSite=None requires Secure; production always uses Secure.
+  const cookieSecure = isProduction || cookieSameSite === 'none';
 
   const result: ForgeEnv = {
     port,

@@ -20,9 +20,24 @@ const EMPTY_SUMMARY: MiningSummaryResponse = {
   error: null,
 };
 
+/**
+ * Resolve a Forge API path for fetch().
+ * Default (unset / empty base): same-origin relative `/api/...` (Netlify proxy or Vite proxy).
+ * Optional `VITE_FORGE_API_BASE_URL`: absolute origin override for local/preview/alternate topology.
+ */
+export function resolveForgeApiUrl(
+  path: string,
+  baseUrl: string | undefined = import.meta.env.VITE_FORGE_API_BASE_URL as
+    | string
+    | undefined,
+): string {
+  const base = (baseUrl ?? '').trim().replace(/\/$/, '');
+  const normalized = path.startsWith('/') ? path : `/${path}`;
+  return `${base}${normalized}`;
+}
+
 function apiUrl(path: string): string {
-  const base = (import.meta.env.VITE_FORGE_API_BASE_URL ?? '').replace(/\/$/, '');
-  return `${base}${path}`;
+  return resolveForgeApiUrl(path);
 }
 
 async function apiFetch(

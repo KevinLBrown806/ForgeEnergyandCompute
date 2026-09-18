@@ -7,6 +7,7 @@ describe('env validation', () => {
     delete process.env.BRAIINS_API_TOKEN;
     delete process.env.FORGE_OPERATOR_PASSWORD;
     delete process.env.FORGE_SESSION_SECRET;
+    delete process.env.FORGE_COOKIE_SAMESITE;
     delete process.env.CORS_ORIGINS;
     delete process.env.RATE_LIMIT_PER_MINUTE;
     delete process.env.BRAIINS_TIMEOUT_MS;
@@ -51,18 +52,39 @@ describe('env validation', () => {
     ).toThrow(/FORGE_OPERATOR_PASSWORD/);
   });
 
-  it('accepts production Braiins when operator auth is configured', () => {
+  it('accepts production Braiins with SameSite=Lax for same-origin Netlify proxy', () => {
     const env = loadEnv({
       NODE_ENV: 'production',
       BRAIINS_API_TOKEN: 'secret-token',
       FORGE_OPERATOR_PASSWORD: 'op-password',
       FORGE_SESSION_SECRET: 'a'.repeat(32),
-      CORS_ORIGINS: 'https://app.example.com',
+      CORS_ORIGINS: 'https://forge-energy-and-compute.netlify.app',
     });
     expect(env.braiinsConfigured).toBe(true);
     expect(env.authConfigured).toBe(true);
+    expect(env.cookieSameSite).toBe('lax');
+    expect(env.cookieSecure).toBe(true);
+  });
+
+  it('allows SameSite=None only when FORGE_COOKIE_SAMESITE=none', () => {
+    const env = loadEnv({
+      NODE_ENV: 'production',
+      BRAIINS_API_TOKEN: 'secret-token',
+      FORGE_OPERATOR_PASSWORD: 'op-password',
+      FORGE_SESSION_SECRET: 'a'.repeat(32),
+      CORS_ORIGINS: 'https://forge-energy-and-compute.netlify.app',
+      FORGE_COOKIE_SAMESITE: 'none',
+    });
     expect(env.cookieSameSite).toBe('none');
     expect(env.cookieSecure).toBe(true);
+  });
+
+  it('rejects invalid FORGE_COOKIE_SAMESITE', () => {
+    expect(() =>
+      loadEnv({
+        FORGE_COOKIE_SAMESITE: 'strict',
+      }),
+    ).toThrow(/FORGE_COOKIE_SAMESITE/);
   });
 
   it('rejects non-integer RATE_LIMIT_PER_MINUTE', () => {

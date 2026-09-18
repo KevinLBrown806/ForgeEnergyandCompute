@@ -27,6 +27,7 @@ describe('telemetry authentication', () => {
     delete process.env.BRAIINS_API_TOKEN;
     delete process.env.FORGE_OPERATOR_PASSWORD;
     delete process.env.FORGE_SESSION_SECRET;
+    delete process.env.FORGE_COOKIE_SAMESITE;
     delete process.env.CORS_ORIGINS;
     delete process.env.BRAIINS_REQUEST_INTERVAL_MS;
     delete process.env.NODE_ENV;
@@ -82,5 +83,39 @@ describe('telemetry authentication', () => {
       .set('Cookie', cookie);
     expect(authed.status).not.toBe(401);
     expect(authed.status).not.toBe(503);
+  });
+
+  it('sets HttpOnly Secure SameSite=Lax cookies for production same-origin proxy', async () => {
+    loadEnv({
+      NODE_ENV: 'production',
+      BRAIINS_API_TOKEN: 'pool-token',
+      FORGE_OPERATOR_PASSWORD: 'correct-horse',
+      FORGE_SESSION_SECRET: 'b'.repeat(32),
+      CORS_ORIGINS: 'https://forge-energy-and-compute.netlify.app',
+    });
+    const app = buildApp();
+
+    const denied = await request(app).get('/api/mining/summary');
+    expect(denied.status).toBe(401);
+
+    const login = await request(app)
+      .post('/api/auth/login')
+      .send({ password: 'correct-horse' });
+    expect(login.status).toBe(200);
+    const setCookie = String(login.headers['set-cookie']?.[0] ?? '');
+    expect(setCookie).toMatch(/HttpOnly/i);
+    expect(setCookie).toMatch(/Secure/i);
+    expect(setCookie).toMatch(/SameSite=Lax/i);
+    expect(setCookie).not.toMatch(/SameSite=None/i);
+
+    const cookie = setCookie.split(';')[0];
+    const session = await request(app)
+      .get('/api/auth/session')
+      .set('Cookie', cookie);
+    expect(session.status).toBe(200);
+    expect(session.body.authenticated).toBe(true);
+
+    const deniedAgain = await request(app).get('/api/mining/summary');
+    expect(deniedAgain.status).toBe(401);
   });
 });

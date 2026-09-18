@@ -43,8 +43,10 @@ npm run dev
 ```
 
 Vite listens on `0.0.0.0:$PORT` (default `5173`) and proxies `/api` to
-`http://localhost:8787`. If the API is hosted elsewhere, set
-`VITE_FORGE_API_BASE_URL` to its origin, without a trailing slash.
+`http://localhost:8787`. Production Netlify does the same via a `/api/*`
+rewrite to Render. Leave `VITE_FORGE_API_BASE_URL` unset for same-origin
+`/api/...` requests. Set it only when you intentionally call a Forge origin
+directly (no trailing slash).
 
 Copy `.env.example` only as a list of supported variable names. The server does
 not load committed env files and no real secret belongs in Git, frontend
@@ -80,12 +82,15 @@ Runtime variables:
 | Variable | Purpose |
 | --- | --- |
 | `BRAIINS_API_TOKEN` | Server-only Braiins access token |
-| `CORS_ORIGINS` | Comma-separated allowed frontend origins |
+| `CORS_ORIGINS` | Exact allowlist of frontend origins (defense in depth) |
+| `FORGE_OPERATOR_PASSWORD` | Operator login password (server-only) |
+| `FORGE_SESSION_SECRET` | HMAC secret for HttpOnly session cookies |
+| `FORGE_COOKIE_SAMESITE` | `lax` (default, Netlify same-origin proxy) or `none` (direct cross-origin testing) |
 | `PORT` | API listen port (Render supplies this) |
 | `RATE_LIMIT_PER_MINUTE` | Forge API per-client request limit |
 | `BRAIINS_TIMEOUT_MS` | Optional upstream timeout override |
 | `BRAIINS_REQUEST_INTERVAL_MS` | Optional upstream request-spacing override |
-| `VITE_FORGE_API_BASE_URL` | Public Forge API origin used by the frontend |
+| `VITE_FORGE_API_BASE_URL` | Optional absolute Forge origin; unset = same-origin `/api` |
 
 
 ## Authentication & production gate
@@ -97,8 +102,11 @@ Architecture:
 
 1. Operator signs in with `FORGE_OPERATOR_PASSWORD` via `POST /api/auth/login`.
 2. Server sets an **HttpOnly** signed session cookie (`FORGE_SESSION_SECRET`).
-3. Browser calls use `credentials: "include"`. No API password/token is placed in
-   Vite env, JS bundles, `localStorage`, or query strings.
+   Production defaults: `Secure` + `SameSite=Lax` (same-origin Netlify `/api` proxy).
+   Set `FORGE_COOKIE_SAMESITE=none` only for direct cross-origin browser→Render tests
+   (`Secure` remains required whenever `SameSite=None`).
+3. Browser calls use `credentials: "include"` against same-origin `/api/...`.
+   No API password/token is placed in Vite env, JS bundles, `localStorage`, or query strings.
 4. Do **not** create `VITE_FORGE_SECRET` or any `VITE_BRAIINS_*` variable.
 
 Production fail-closed rules:
@@ -107,6 +115,10 @@ Production fail-closed rules:
   unless both `FORGE_OPERATOR_PASSWORD` and `FORGE_SESSION_SECRET` are set.
 - `CORS_ORIGINS=*` is rejected when Braiins is configured or in production.
 - CORS remains an additional browser restriction, not the security boundary.
+  Normal production browser traffic reaches Forge through the Netlify `/api/*`
+  proxy (same-origin), not direct frontend→Render XHR. Keep the exact Netlify
+  origin in `CORS_ORIGINS` as defense in depth for any direct access attempts.
+  Anonymous access to protected telemetry endpoints remains blocked by Forge auth.
 
 ### Miner ↔ worker cardinality
 
@@ -129,6 +141,16 @@ A payouts or rewards failure does not erase worker telemetry. The API returns
 
 ## Deployment
 
+Production request flow:
+
+```text
+Browser
+  → https://forge-energy-and-compute.netlify.app/api/*
+  → Netlify rewrite (status 200)
+  → Render forge-api /api/*
+  → Braiins Pool (server-side token only)
+```
+
 ### Render API
 
 `render.yaml` defines the `forge-api` Node web service with
@@ -139,20 +161,28 @@ A payouts or rewards failure does not erase worker telemetry. The API returns
 2. Set `BRAIINS_API_TOKEN` as a secret environment variable.
 3. Set `FORGE_OPERATOR_PASSWORD` and `FORGE_SESSION_SECRET` (required in
    production whenever Braiins is enabled).
-4. Set `CORS_ORIGINS` to the exact Netlify production URL and any approved
+4. Leave `FORGE_COOKIE_SAMESITE=lax` (Blueprint default) for the Netlify proxy path.
+5. Set `CORS_ORIGINS` to the exact Netlify production URL and any approved
    preview/custom-domain origins, comma-separated. Do not use `*`.
-5. Confirm `/api/health` returns `ok: true`, then sign in from the UI before
+6. Confirm `/api/health` returns `ok: true`, then sign in from the UI before
    expecting live telemetry.
 
 The service filesystem is not used for persistent data.
 
 ### Netlify frontend
 
-`netlify.toml` builds the Vite app to `dist/` and provides the SPA fallback.
+`netlify.toml` builds the Vite app to `dist/`, proxies `/api/*` to Render, then
+falls back to the SPA.
 
 1. Connect the repository in Netlify.
-2. Set `VITE_FORGE_API_BASE_URL` to the Render API origin.
-3. Deploy and add the resulting frontend origin to Render `CORS_ORIGINS`.
+2. In `netlify.toml`, set the `/api/*` rewrite `to` host to your public Render
+   `forge-api` origin (keep `/api/:splat`). Example:
+   `https://forge-api.onrender.com/api/:splat`. Update this whenever the Render
+   public URL changes. Do not put secrets in `netlify.toml`.
+3. Do **not** set `VITE_FORGE_API_BASE_URL` for normal production — the browser
+   must call same-origin `/api/...`. Use that variable only for preview/local
+   overrides that talk to Forge directly.
+4. Deploy, then ensure Render `CORS_ORIGINS` includes the Netlify site origin.
 
 ## Scripts and verification
 

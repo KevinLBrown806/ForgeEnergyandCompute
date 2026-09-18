@@ -12,6 +12,18 @@
     Referrer-Policy = "no-referrer"
     X-Frame-Options = "DENY"
 
+# Same-origin API proxy: browser → Netlify /api/* → Render forge-api.
+# OPERATOR: replace the `to` host with your public Render forge-api origin
+# (no trailing slash; keep the `/api/:splat` path). This is a public URL, not a secret.
+# Example: https://forge-api.onrender.com/api/:splat
+# Do not proxy arbitrary paths — only /api/*.
+# This rule MUST stay above the SPA catch-all.
+[[redirects]]
+  from = "/api/*"
+  to = "https://forge-api.onrender.com/api/:splat"
+  status = 200
+  force = true
+
 [[redirects]]
   from = "/*"
   to = "/index.html"

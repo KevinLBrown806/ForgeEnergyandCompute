@@ -19,6 +19,8 @@ services:
         sync: false
       - key: FORGE_SESSION_SECRET
         sync: false
+      - key: FORGE_COOKIE_SAMESITE
+        value: "lax"
       - key: RATE_LIMIT_PER_MINUTE
         value: "60"
       - key: BRAIINS_TIMEOUT_MS
