@@ -111,7 +111,10 @@ export function MiningCalculator() {
         <Result label="Revenue / month" value={formatUsdCompact(result.monthlyRevenue)} />
         <Result label="Gross profit / month" value={formatUsdCompact(result.monthlyGrossProfit)} tone={cashflowPositive ? 'positive' : 'negative'} />
         <Result label="Mining margin" value={formatPercent(result.miningMarginPct)} tone={cashflowPositive ? 'positive' : 'negative'} />
-        <Result label="Breakeven BTC price" value={formatUsd(result.breakevenBtcPrice)} sub={`${formatTonnes(result.monthlyCo2Tonnes)} CO₂ / mo`} />
+        <Result label="Breakeven BTC price" value={formatUsd(result.breakevenBtcPrice)} />
+        <p className="calc__secondary">
+          Secondary · estimated {formatTonnes(result.monthlyCo2Tonnes)} CO₂ / month
+        </p>
       </div>
     </div>
   );

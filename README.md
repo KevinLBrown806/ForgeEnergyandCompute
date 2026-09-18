@@ -31,9 +31,10 @@ The dev server binds to `0.0.0.0` and honors the `PORT` environment variable.
 ## Editing the data
 
 All dashboard figures live in one file — **`src/config/forge.config.ts`**.
-Change BTC holdings, miner quantities, electricity prices, capital allocation,
-the roadmap, etc. there without touching any UI component. When a real API is
-added later, replace the exported values with fetched data of the same shape.
+Change BTC holdings, miner quantities, electricity prices, capital allocation
+(`capital.totalUsd` and slice percentages), the roadmap, etc. there without
+touching any UI component. When a real API is added later, replace the exported
+values with fetched data of the same shape.
 
 ## Project layout
 
@@ -43,6 +44,7 @@ src/
   lib/
     mining.ts              # Mining economics + fleet aggregation (pure)
     treasury.ts            # Treasury valuation & projections (pure)
+    capital.ts             # Capital allocation dollar mapping (pure)
     estimator.ts           # Shared energy/carbon math (reused by mining)
     format.ts              # Display formatters
     *.test.ts              # Unit tests for the calculation logic

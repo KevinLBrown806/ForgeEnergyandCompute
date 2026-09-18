@@ -1,14 +1,16 @@
+import type { ReactNode } from 'react';
 import { Nav } from './components/Nav';
 import { StatCard } from './components/StatCard';
 import { AccumulationChart } from './components/AccumulationChart';
 import { AllocationChart } from './components/AllocationChart';
 import { MiningCalculator } from './components/MiningCalculator';
 import {
-  capitalAllocation,
+  capital,
   energy,
   fleet,
   flywheel,
   market,
+  meta,
   roadmap,
   treasury,
   type AssetStatus,
@@ -20,6 +22,7 @@ import {
   computeMinerEconomics,
   summarizeFleet,
   type FleetContext,
+  type MinerEconomics,
 } from './lib/mining';
 import { computeTreasury } from './lib/treasury';
 import {
@@ -31,6 +34,7 @@ import {
   formatPercent,
   formatUsd,
   formatUsdCompact,
+  formatUsdPerKwh,
 } from './lib/format';
 
 const production = btcPerThPerDay(market.network);
@@ -71,11 +75,10 @@ function App() {
             <h1>Energy → Compute → Bitcoin → Treasury</h1>
           </div>
           <p className="lede-row__note">
-            Private mining &amp; energy command center · figures from mock data
+            {meta.dataMode} · as of {meta.asOfLabel}
           </p>
         </section>
 
-        {/* Overview */}
         <Section id="overview" title="Executive overview">
           <div className="grid grid--cards">
             <StatCard
@@ -114,8 +117,7 @@ function App() {
             />
             <StatCard
               label="Electricity Cost"
-              value={`$${energy.avgElectricityRatePerKwh.toFixed(3)}`}
-              hint="per kWh"
+              value={formatUsdPerKwh(energy.avgElectricityRatePerKwh)}
             />
             <StatCard
               label="Est. BTC Mined / mo"
@@ -142,7 +144,6 @@ function App() {
           </div>
         </Section>
 
-        {/* Treasury */}
         <Section id="treasury" title="Bitcoin treasury">
           <div className="split">
             <div className="grid grid--cards grid--compact">
@@ -170,14 +171,15 @@ function App() {
             <div className="panel">
               <div className="panel__head">
                 <h3>BTC accumulation</h3>
-                <span className="panel__meta">Cumulative holdings · target {formatBtc(treasury.targetBtc, 0)}</span>
+                <span className="panel__meta">
+                  Cumulative holdings · target {formatBtc(treasury.targetBtc, 0)}
+                </span>
               </div>
               <AccumulationChart data={[...treasury.accumulationHistory]} targetBtc={treasury.targetBtc} />
             </div>
           </div>
         </Section>
 
-        {/* Mining */}
         <Section id="mining" title="Mining fleet">
           <div className="panel panel--table">
             <div className="table-wrap">
@@ -218,6 +220,12 @@ function App() {
             </div>
           </div>
 
+          <div className="fleet-cards">
+            {minerLines.map((line) => (
+              <MinerCard key={line.miner.id} line={line} />
+            ))}
+          </div>
+
           <div className="panel">
             <div className="panel__head">
               <h3>Mining economics calculator</h3>
@@ -227,14 +235,38 @@ function App() {
           </div>
         </Section>
 
-        {/* Energy */}
         <Section id="energy" title="Energy & infrastructure">
           <div className="grid grid--cards grid--compact">
             <StatCard label="Available Power" value={formatMw(energy.availableMw)} />
             <StatCard label="Deployed Power" value={formatMw(energy.deployedMw)} />
-            <StatCard label="Avg Electricity Rate" value={`$${energy.avgElectricityRatePerKwh.toFixed(3)}`} hint="per kWh" />
+            <StatCard
+              label="Avg Electricity Rate"
+              value={formatUsdPerKwh(energy.avgElectricityRatePerKwh)}
+            />
             <StatCard label="Miner Load" value={formatMw(minerLoadMw)} />
-            <StatCard label="Infra Utilization" value={formatPercent(utilization, 0)} hint="deployed / available" />
+            <StatCard
+              label="Infra Utilization"
+              value={formatPercent(utilization, 0)}
+              hint="deployed / available"
+            />
+          </div>
+          <div className="panel">
+            <div className="panel__head">
+              <h3>Site utilization</h3>
+              <span className="panel__meta">
+                {formatMw(energy.deployedMw)} of {formatMw(energy.availableMw)}
+              </span>
+            </div>
+            <div
+              className="meter"
+              role="meter"
+              aria-valuemin={0}
+              aria-valuemax={100}
+              aria-valuenow={Math.round(utilization * 100)}
+              aria-label="Infrastructure utilization"
+            >
+              <div className="meter__fill" style={{ width: `${Math.min(utilization * 100, 100)}%` }} />
+            </div>
           </div>
           <div className="panel">
             <div className="panel__head">
@@ -255,14 +287,12 @@ function App() {
           </div>
         </Section>
 
-        {/* Capital */}
         <Section id="capital" title="Capital allocation">
           <div className="panel panel--center">
-            <AllocationChart slices={capitalAllocation} />
+            <AllocationChart slices={capital.slices} totalUsd={capital.totalUsd} />
           </div>
         </Section>
 
-        {/* Strategy */}
         <Section id="strategy" title="Strategy & roadmap">
           <div className="split split--strategy">
             <div className="panel">
@@ -298,7 +328,7 @@ function App() {
 
       <footer className="footer">
         <span>© {new Date().getFullYear()} Forge Energy &amp; Compute</span>
-        <span className="footer__note">v1 operating dashboard · mock data</span>
+        <span className="footer__note">v1 operating dashboard · {meta.dataMode.toLowerCase()}</span>
       </footer>
     </div>
   );
@@ -311,7 +341,7 @@ function Section({
 }: {
   id: string;
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section id={id} className="section" aria-labelledby={`${id}-title`}>
@@ -320,6 +350,51 @@ function Section({
       </div>
       {children}
     </section>
+  );
+}
+
+function MinerCard({ line }: { line: MinerEconomics }) {
+  return (
+    <article className={`miner-card${line.active ? '' : ' miner-card--muted'}`}>
+      <header className="miner-card__head">
+        <h3>{line.miner.model}</h3>
+        <MinerStatusBadge status={line.miner.status} />
+      </header>
+      <dl className="miner-card__grid">
+        <div>
+          <dt>Qty</dt>
+          <dd>{formatNumber(line.miner.quantity)}</dd>
+        </div>
+        <div>
+          <dt>Hashrate</dt>
+          <dd>{formatHashrate(line.totalHashrateTh)}</dd>
+        </div>
+        <div>
+          <dt>Watts</dt>
+          <dd>{formatNumber(line.miner.watts)}</dd>
+        </div>
+        <div>
+          <dt>J/TH</dt>
+          <dd>{formatJTh(line.efficiencyJPerTh)}</dd>
+        </div>
+        <div>
+          <dt>Elec / day</dt>
+          <dd>{formatUsd(line.electricityCostPerDay)}</dd>
+        </div>
+        <div>
+          <dt>BTC / mo</dt>
+          <dd>{line.active ? formatBtc(line.btcPerMonth, 2) : '—'}</dd>
+        </div>
+        <div>
+          <dt>Revenue / mo</dt>
+          <dd>{line.active ? formatUsdCompact(line.monthlyRevenue) : '—'}</dd>
+        </div>
+        <div>
+          <dt>Margin</dt>
+          <dd>{line.active ? formatPercent(line.operatingMarginPct) : '—'}</dd>
+        </div>
+      </dl>
+    </article>
   );
 }
 
