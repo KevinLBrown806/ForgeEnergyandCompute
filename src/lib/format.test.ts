@@ -60,6 +60,6 @@ describe('formatPercent', () => {
 
 describe('formatUsdPerKwh', () => {
   it('formats a three-decimal electricity rate', () => {
-    expect(formatUsdPerKwh(0.045)).toBe('$0.045 / kWh');
+    expect(formatUsdPerKwh(0.045)).toBe('$0.045/kWh');
   });
 });

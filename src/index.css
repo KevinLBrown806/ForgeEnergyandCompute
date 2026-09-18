@@ -258,6 +258,7 @@ a {
   font-size: 1.35rem;
   font-weight: 600;
   letter-spacing: -0.02em;
+  white-space: nowrap;
 }
 
 .stat-card--btc .stat-card__value {

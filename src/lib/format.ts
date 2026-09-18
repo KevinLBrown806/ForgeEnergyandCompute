@@ -33,7 +33,7 @@ export function formatUsdCompact(value: number): string {
 
 /** Electricity rate display, e.g. $0.045 / kWh. */
 export function formatUsdPerKwh(value: number): string {
-  return `$${value.toFixed(3)} / kWh`;
+  return `$${value.toFixed(3)}/kWh`;
 }
 
 export function formatNumber(value: number, maximumFractionDigits = 0): string {
