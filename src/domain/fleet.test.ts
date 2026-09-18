@@ -75,6 +75,7 @@ describe('fleet matching and health', () => {
       asset({ id: 'degraded', braiinsWorkerName: 'degraded' }),
       asset({ id: 'offline', braiinsWorkerName: 'offline' }),
       asset({ id: 'unmapped', braiinsWorkerName: null }),
+      asset({ id: 'unknown', braiinsWorkerName: 'unknown' }),
     ];
     const rows = buildFleetRows({
       assets,
@@ -85,6 +86,7 @@ describe('fleet matching and health', () => {
           name: 'offline',
           lastShareAt: '2026-09-18T18:00:00.000Z',
         }),
+        worker({ name: 'unknown', state: 'unknown' }),
       ],
       ...economics,
       nowMs: NOW,
@@ -95,6 +97,7 @@ describe('fleet matching and health', () => {
       'DEGRADED',
       'OFFLINE',
       'UNMAPPED',
+      'NO_DATA',
     ]);
   });
 });

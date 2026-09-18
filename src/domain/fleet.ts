@@ -95,7 +95,14 @@ export function deriveHealth(args: {
   }
 
   if (state === 'low') return 'DEGRADED';
-  if (state === 'dis' || state === 'disabled') return 'NO_DATA';
+  if (
+    state === 'dis' ||
+    state === 'disabled' ||
+    state === 'unknown' ||
+    state === ''
+  ) {
+    return 'NO_DATA';
+  }
 
   return 'ONLINE';
 }

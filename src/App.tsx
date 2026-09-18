@@ -107,12 +107,25 @@ function App() {
       setTreasury(position);
       setDemoMode(isDemo);
     });
-    void fetchMiningSummary(controller.signal).then((summary) => {
-      if (!controller.signal.aborted) {
-        setPool(summary);
-        setPoolLoading(false);
-      }
-    });
+    void fetchMiningSummary(controller.signal)
+      .then((summary) => {
+        if (!controller.signal.aborted) {
+          setPool(summary);
+          setPoolLoading(false);
+        }
+      })
+      .catch((error: unknown) => {
+        if (
+          !controller.signal.aborted &&
+          !(error instanceof DOMException && error.name === 'AbortError')
+        ) {
+          setPool({
+            ...EMPTY_SUMMARY,
+            error: 'Forge API is unavailable',
+          });
+          setPoolLoading(false);
+        }
+      });
     return () => controller.abort();
   }, []);
 
