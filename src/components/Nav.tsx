@@ -1,6 +1,7 @@
 const LINKS = [
   { href: '#overview', label: 'Overview' },
   { href: '#treasury', label: 'Treasury' },
+  { href: '#fleet', label: 'Fleet' },
   { href: '#mining', label: 'Mining' },
   { href: '#energy', label: 'Energy' },
   { href: '#capital', label: 'Capital' },

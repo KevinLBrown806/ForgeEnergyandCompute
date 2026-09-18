@@ -1,64 +1,192 @@
-import { Nav } from './components/Nav';
-import { StatCard } from './components/StatCard';
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccumulationChart } from './components/AccumulationChart';
 import { AllocationChart } from './components/AllocationChart';
+import { FleetRegistry } from './components/FleetRegistry';
 import { MiningCalculator } from './components/MiningCalculator';
+import { Nav } from './components/Nav';
+import { OperationsAlerts } from './components/OperationsAlerts';
+import { StatCard } from './components/StatCard';
+import { TreasuryEditor } from './components/TreasuryEditor';
+import { WorkersPanel } from './components/WorkersPanel';
+import {
+  createLocalDemoModeStore,
+  createLocalFleetRepository,
+  createLocalTreasuryRepository,
+} from './adapters/localStorage';
 import {
   capitalAllocation,
   energy,
-  fleet,
   flywheel,
   market,
   roadmap,
-  treasury,
+  treasuryDefaults,
   type AssetStatus,
-  type MinerStatus,
   type RoadmapStatus,
 } from './config/forge.config';
+import { DEMO_FLEET } from './config/demoFleet';
 import {
-  btcPerThPerDay,
-  computeMinerEconomics,
-  summarizeFleet,
-  type FleetContext,
-} from './lib/mining';
-import { computeTreasury } from './lib/treasury';
+  aggregateFleet,
+  buildFleetRows,
+  buildOperationsAlerts,
+} from './domain/fleet';
+import type {
+  MinerAsset,
+  MinerAssetInput,
+  MiningSummaryResponse,
+  TreasuryPosition,
+} from './domain/types';
 import {
   formatBtc,
   formatHashrate,
-  formatJTh,
   formatMw,
   formatNumber,
   formatPercent,
   formatUsd,
   formatUsdCompact,
 } from './lib/format';
+import { btcPerThPerDay } from './lib/mining';
+import { computeTreasury } from './lib/treasury';
+import { fetchMiningSummary } from './services/forgeApi';
+
+const fleetRepository = createLocalFleetRepository();
+const treasuryRepository = createLocalTreasuryRepository();
+const demoModeStore = createLocalDemoModeStore();
+
+const EMPTY_SUMMARY: MiningSummaryResponse = {
+  ok: false,
+  configured: false,
+  fetchedAt: null,
+  account: null,
+  workers: [],
+  rewards: [],
+  payouts: [],
+  error: null,
+};
+
+const DEFAULT_TREASURY: TreasuryPosition = {
+  btcHoldings: treasuryDefaults.btcHoldings,
+  avgAcquisitionPriceUsd: treasuryDefaults.avgAcquisitionPriceUsd,
+  monthlyAccumulationBtc: treasuryDefaults.monthlyAccumulationBtc,
+  targetBtc: treasuryDefaults.targetBtc,
+  source: 'manual',
+  updatedAt: new Date(0).toISOString(),
+};
 
 const production = btcPerThPerDay(market.network);
 
-const fleetCtx: FleetContext = {
-  btcPriceUsd: market.btcPriceUsd,
-  btcPerThPerDay: production,
-  poolFeePct: market.poolFeePct,
-  uptimePct: market.uptimePct,
-  electricityRatePerKwh: energy.avgElectricityRatePerKwh,
-  carbonKgPerKwh: market.carbonKgPerKwh,
-};
-
 function App() {
-  const summary = summarizeFleet(fleet, fleetCtx);
+  const [storedAssets, setStoredAssets] = useState<MinerAsset[]>([]);
+  const [demoMode, setDemoMode] = useState(false);
+  const [treasury, setTreasury] =
+    useState<TreasuryPosition>(DEFAULT_TREASURY);
+  const [pool, setPool] = useState<MiningSummaryResponse>(EMPTY_SUMMARY);
+  const [poolLoading, setPoolLoading] = useState(true);
+
+  const reloadFleet = useCallback(async () => {
+    setStoredAssets(await fleetRepository.list());
+  }, []);
+
+  const reloadPool = useCallback(async () => {
+    setPoolLoading(true);
+    try {
+      setPool(await fetchMiningSummary());
+    } finally {
+      setPoolLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void Promise.all([
+      fleetRepository.list(),
+      treasuryRepository.get(),
+      demoModeStore.isDemoMode(),
+    ]).then(([assets, position, isDemo]) => {
+      if (controller.signal.aborted) return;
+      setStoredAssets(assets);
+      setTreasury(position);
+      setDemoMode(isDemo);
+    });
+    void fetchMiningSummary(controller.signal).then((summary) => {
+      if (!controller.signal.aborted) {
+        setPool(summary);
+        setPoolLoading(false);
+      }
+    });
+    return () => controller.abort();
+  }, []);
+
+  const assets = demoMode ? DEMO_FLEET : storedAssets;
+  const rows = useMemo(
+    () =>
+      buildFleetRows({
+        assets,
+        workers: pool.workers,
+        btcPerThPerDay: production,
+        btcPriceUsd: market.btcPriceUsd,
+        poolFeePct: market.poolFeePct,
+        defaultElectricityRatePerKwh: energy.avgElectricityRatePerKwh,
+      }),
+    [assets, pool.workers],
+  );
+  const aggregate = useMemo(
+    () =>
+      aggregateFleet({
+        rows,
+        rewards: pool.rewards,
+        payouts: pool.payouts,
+        unpaidBalanceBtc: pool.account?.currentBalanceBtc ?? null,
+        btcEarnedToday: pool.account?.todayRewardBtc ?? null,
+      }),
+    [pool.account, pool.payouts, pool.rewards, rows],
+  );
+  const alerts = useMemo(
+    () =>
+      buildOperationsAlerts({
+        rows,
+        workers: pool.workers,
+        poolConfigured: pool.configured,
+        poolError: pool.error,
+      }),
+    [pool.configured, pool.error, pool.workers, rows],
+  );
   const treasuryResult = computeTreasury({
-    btcHoldings: treasury.btcHoldings,
-    avgAcquisitionPriceUsd: treasury.avgAcquisitionPriceUsd,
+    ...treasury,
     btcPriceUsd: market.btcPriceUsd,
-    monthlyAccumulationBtc: treasury.monthlyAccumulationBtc,
-    targetBtc: treasury.targetBtc,
   });
-  const minerLines = fleet.map((m) => computeMinerEconomics(m, fleetCtx));
-  const minerLoadMw = summary.activePowerKw / 1000;
+  const minerLoadMw =
+    assets
+      .filter((asset) => asset.enabled && asset.status === 'active')
+      .reduce(
+        (sum, asset) => sum + asset.quantity * asset.wattage,
+        0,
+      ) / 1_000_000;
   const utilization =
     energy.availableMw > 0 ? energy.deployedMw / energy.availableMw : 0;
-  const cashPositive = summary.monthlyCashFlow >= 0;
-  const gainPositive = treasuryResult.unrealizedPnlUsd >= 0;
+
+  const createAsset = async (input: MinerAssetInput) => {
+    await fleetRepository.create(input);
+    await reloadFleet();
+  };
+  const updateAsset = async (id: string, input: MinerAssetInput) => {
+    await fleetRepository.update(id, input);
+    await reloadFleet();
+  };
+  const removeAsset = async (id: string) => {
+    await fleetRepository.remove(id);
+    await reloadFleet();
+  };
+  const toggleAsset = async (asset: MinerAsset) => {
+    await fleetRepository.update(asset.id, { enabled: !asset.enabled });
+    await reloadFleet();
+  };
+  const changeDemoMode = async (enabled: boolean) => {
+    await demoModeStore.setDemoMode(enabled);
+    setDemoMode(enabled);
+  };
+  const saveTreasury = async (position: TreasuryPosition) => {
+    setTreasury(await treasuryRepository.save(position));
+  };
 
   return (
     <div className="page">
@@ -71,170 +199,200 @@ function App() {
             <h1>Energy → Compute → Bitcoin → Treasury</h1>
           </div>
           <p className="lede-row__note">
-            Private mining &amp; energy command center · figures from mock data
+            Fleet registry + Braiins Pool telemetry
+            {demoMode ? ' · DEMO MODE' : ''}
           </p>
         </section>
 
-        {/* Overview */}
-        <Section id="overview" title="Executive overview">
+        <Section id="overview" title="Executive overview · actual">
           <div className="grid grid--cards">
             <StatCard
-              label="Bitcoin Treasury"
-              value={formatBtc(treasury.btcHoldings)}
-              hint={`Target ${formatBtc(treasury.targetBtc, 0)}`}
-              tone="btc"
-            />
-            <StatCard label="BTC Price" value={formatUsd(market.btcPriceUsd)} />
-            <StatCard
-              label="Treasury Value"
-              value={formatUsdCompact(treasuryResult.currentValueUsd)}
+              label="Registered Miners · Actual"
+              value={formatNumber(aggregate.registeredMiners)}
+              hint={`${aggregate.enabledMiners} enabled`}
             />
             <StatCard
-              label="Miner Fleet"
-              value={formatNumber(summary.totalMiners)}
-              hint={`${fleet.length} models`}
+              label="Online Miners · Actual"
+              value={formatNumber(aggregate.onlineMiners)}
+              hint={`${aggregate.degradedMiners} degraded · ${aggregate.offlineMiners} offline`}
+              tone={aggregate.offlineMiners ? 'negative' : 'positive'}
             />
             <StatCard
-              label="Active Miners"
-              value={formatNumber(summary.activeMiners)}
-              hint={`${formatPercent(summary.activeMiners / summary.totalMiners, 0)} online`}
+              label="Pool Hashrate 5m · Actual"
+              value={formatHashrate(aggregate.currentHashrateTh)}
+              hint={`${formatHashrate(aggregate.expectedHashrateTh)} expected`}
             />
             <StatCard
-              label="Total Hashrate"
-              value={formatHashrate(summary.activeHashrateTh)}
+              label="Fleet Efficiency · Actual"
+              value={
+                aggregate.fleetEfficiencyPct == null
+                  ? '—'
+                  : formatPercent(aggregate.fleetEfficiencyPct)
+              }
+              hint="5m hashrate / registered nominal"
             />
             <StatCard
-              label="Avg Fleet Efficiency"
-              value={formatJTh(summary.avgEfficiencyJPerTh)}
-            />
-            <StatCard
-              label="Power Capacity"
-              value={formatMw(energy.availableMw)}
-              hint={`${formatMw(energy.deployedMw)} deployed`}
-            />
-            <StatCard
-              label="Electricity Cost"
-              value={`$${energy.avgElectricityRatePerKwh.toFixed(3)}`}
-              hint="per kWh"
-            />
-            <StatCard
-              label="Est. BTC Mined / mo"
-              value={formatBtc(summary.btcMinedPerMonth, 2)}
+              label="BTC Earned Today · Actual"
+              value={
+                aggregate.btcEarnedToday == null
+                  ? '—'
+                  : formatBtc(aggregate.btcEarnedToday)
+              }
               tone="btc"
             />
             <StatCard
-              label="Mining Revenue / mo"
-              value={formatUsdCompact(summary.monthlyRevenue)}
+              label="BTC Earned 30d · Actual"
+              value={
+                aggregate.btcEarned30d == null
+                  ? '—'
+                  : formatBtc(aggregate.btcEarned30d)
+              }
+              tone="btc"
             />
             <StatCard
-              label="Mining Op Cost / mo"
-              value={formatUsdCompact(summary.monthlyOperatingCost)}
+              label="Unpaid Pool Balance · Actual"
+              value={
+                aggregate.unpaidBalanceBtc == null
+                  ? '—'
+                  : formatBtc(aggregate.unpaidBalanceBtc)
+              }
             />
             <StatCard
-              label="Mining Cash Flow / mo"
-              value={formatUsdCompact(summary.monthlyCashFlow)}
-              tone={cashPositive ? 'positive' : 'negative'}
+              label="Mining Contribution · Actual"
+              value={formatUsdCompact(
+                aggregate.miningContributionMonthlyUsd,
+              )}
+              hint="Live 24h production less registered costs"
+              tone={
+                aggregate.miningContributionMonthlyUsd >= 0
+                  ? 'positive'
+                  : 'negative'
+              }
             />
-            <StatCard
-              label="Breakeven BTC Price"
-              value={formatUsd(summary.breakevenBtcPrice)}
-            />
+          </div>
+          <div className="overview-alerts">
+            <OperationsAlerts alerts={alerts} />
           </div>
         </Section>
 
-        {/* Treasury */}
-        <Section id="treasury" title="Bitcoin treasury">
+        <Section id="treasury" title="Bitcoin treasury · manual">
           <div className="split">
             <div className="grid grid--cards grid--compact">
-              <StatCard label="BTC Holdings" value={formatBtc(treasury.btcHoldings)} tone="btc" />
-              <StatCard label="Avg Acquisition" value={formatUsd(treasury.avgAcquisitionPriceUsd)} />
-              <StatCard label="Current Value" value={formatUsdCompact(treasuryResult.currentValueUsd)} />
+              <StatCard
+                label="BTC Holdings · Manual"
+                value={formatBtc(treasury.btcHoldings)}
+                tone="btc"
+              />
+              <StatCard
+                label="Avg Acquisition"
+                value={formatUsd(treasury.avgAcquisitionPriceUsd)}
+              />
+              <StatCard
+                label="Current Value"
+                value={formatUsdCompact(treasuryResult.currentValueUsd)}
+              />
               <StatCard
                 label="Unrealized P/L"
                 value={formatUsdCompact(treasuryResult.unrealizedPnlUsd)}
                 hint={formatPercent(treasuryResult.unrealizedPnlPct)}
-                tone={gainPositive ? 'positive' : 'negative'}
+                tone={
+                  treasuryResult.unrealizedPnlUsd >= 0
+                    ? 'positive'
+                    : 'negative'
+                }
               />
-              <StatCard label="Monthly Accumulation" value={formatBtc(treasury.monthlyAccumulationBtc)} />
-              <StatCard label="Annual Accumulation" value={formatBtc(treasuryResult.annualAccumulationBtc)} />
+              <StatCard
+                label="Monthly Accumulation"
+                value={formatBtc(treasury.monthlyAccumulationBtc)}
+              />
               <StatCard
                 label="Long-term Target"
                 value={formatBtc(treasury.targetBtc, 0)}
                 hint={`${formatPercent(treasuryResult.progressToTargetPct, 0)} reached`}
               />
-              <StatCard
-                label="Cost Basis"
-                value={formatUsdCompact(treasuryResult.costBasisUsd)}
-              />
             </div>
             <div className="panel">
-              <div className="panel__head">
-                <h3>BTC accumulation</h3>
-                <span className="panel__meta">Cumulative holdings · target {formatBtc(treasury.targetBtc, 0)}</span>
-              </div>
-              <AccumulationChart data={[...treasury.accumulationHistory]} targetBtc={treasury.targetBtc} />
+              <TreasuryEditor
+                key={treasury.updatedAt}
+                position={treasury}
+                onSave={saveTreasury}
+              />
             </div>
+          </div>
+          <div className="panel treasury-chart">
+            <div className="panel__head">
+              <h3>BTC accumulation</h3>
+              <span className="panel__meta">
+                History is not inferred from the manual position
+              </span>
+            </div>
+            <AccumulationChart
+              data={[...treasuryDefaults.accumulationHistory]}
+              targetBtc={treasury.targetBtc}
+            />
           </div>
         </Section>
 
-        {/* Mining */}
-        <Section id="mining" title="Mining fleet">
-          <div className="panel panel--table">
-            <div className="table-wrap">
-              <table className="fleet-table">
-                <thead>
-                  <tr>
-                    <th>Model</th>
-                    <th className="num">Qty</th>
-                    <th className="num">Hashrate</th>
-                    <th className="num">Watts</th>
-                    <th className="num">J/TH</th>
-                    <th className="num">Elec / day</th>
-                    <th className="num">BTC / mo</th>
-                    <th className="num">Revenue / mo</th>
-                    <th className="num">Margin</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {minerLines.map((line) => (
-                    <tr key={line.miner.id} className={line.active ? '' : 'row--muted'}>
-                      <td>{line.miner.model}</td>
-                      <td className="num">{formatNumber(line.miner.quantity)}</td>
-                      <td className="num">{formatHashrate(line.totalHashrateTh)}</td>
-                      <td className="num">{formatNumber(line.miner.watts)}</td>
-                      <td className="num">{formatJTh(line.efficiencyJPerTh)}</td>
-                      <td className="num">{formatUsd(line.electricityCostPerDay)}</td>
-                      <td className="num">{line.active ? formatBtc(line.btcPerMonth, 2) : '—'}</td>
-                      <td className="num">{line.active ? formatUsdCompact(line.monthlyRevenue) : '—'}</td>
-                      <td className="num">{line.active ? formatPercent(line.operatingMarginPct) : '—'}</td>
-                      <td>
-                        <MinerStatusBadge status={line.miner.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
+        <Section id="fleet" title="Fleet registry">
+          <FleetRegistry
+            assets={assets}
+            rows={rows}
+            workers={pool.workers}
+            demoMode={demoMode}
+            onDemoModeChange={changeDemoMode}
+            onCreate={createAsset}
+            onUpdate={updateAsset}
+            onRemove={removeAsset}
+            onToggleEnabled={toggleAsset}
+          />
+        </Section>
 
-          <div className="panel">
+        <Section id="mining" title="Mining operations">
+          <WorkersPanel
+            workers={pool.workers}
+            configured={pool.configured}
+            fetchedAt={pool.fetchedAt}
+            onRefresh={() => void reloadPool()}
+          />
+          {poolLoading && <p className="notice">Refreshing pool telemetry…</p>}
+          <div className="panel calculator-panel">
             <div className="panel__head">
-              <h3>Mining economics calculator</h3>
-              <span className="panel__meta">Adjust assumptions · results update live</span>
+              <div>
+                <p className="eyebrow">Forecast / scenario</p>
+                <h3>Mining economics calculator</h3>
+              </div>
+              <span className="panel__meta">
+                Assumptions only · not operating fleet data
+              </span>
             </div>
             <MiningCalculator />
           </div>
         </Section>
 
-        {/* Energy */}
         <Section id="energy" title="Energy & infrastructure">
           <div className="grid grid--cards grid--compact">
-            <StatCard label="Available Power" value={formatMw(energy.availableMw)} />
-            <StatCard label="Deployed Power" value={formatMw(energy.deployedMw)} />
-            <StatCard label="Avg Electricity Rate" value={`$${energy.avgElectricityRatePerKwh.toFixed(3)}`} hint="per kWh" />
-            <StatCard label="Miner Load" value={formatMw(minerLoadMw)} />
-            <StatCard label="Infra Utilization" value={formatPercent(utilization, 0)} hint="deployed / available" />
+            <StatCard
+              label="Available Power · Plan"
+              value={formatMw(energy.availableMw)}
+            />
+            <StatCard
+              label="Deployed Power · Plan"
+              value={formatMw(energy.deployedMw)}
+            />
+            <StatCard
+              label="Avg Electricity Rate · Plan"
+              value={`$${energy.avgElectricityRatePerKwh.toFixed(3)}`}
+              hint="per kWh"
+            />
+            <StatCard
+              label="Registered Miner Load"
+              value={formatMw(minerLoadMw)}
+            />
+            <StatCard
+              label="Infra Utilization · Plan"
+              value={formatPercent(utilization, 0)}
+              hint="deployed / available"
+            />
           </div>
           <div className="panel">
             <div className="panel__head">
@@ -255,14 +413,12 @@ function App() {
           </div>
         </Section>
 
-        {/* Capital */}
-        <Section id="capital" title="Capital allocation">
+        <Section id="capital" title="Capital allocation · plan">
           <div className="panel panel--center">
             <AllocationChart slices={capitalAllocation} />
           </div>
         </Section>
 
-        {/* Strategy */}
         <Section id="strategy" title="Strategy & roadmap">
           <div className="split split--strategy">
             <div className="panel">
@@ -270,9 +426,9 @@ function App() {
                 <h3>The Forge flywheel</h3>
               </div>
               <ol className="flywheel">
-                {flywheel.map((step, i) => (
+                {flywheel.map((step, index) => (
                   <li key={step} className="flywheel__step">
-                    <span className="flywheel__num">{i + 1}</span>
+                    <span className="flywheel__num">{index + 1}</span>
                     <span>{step}</span>
                   </li>
                 ))}
@@ -298,7 +454,9 @@ function App() {
 
       <footer className="footer">
         <span>© {new Date().getFullYear()} Forge Energy &amp; Compute</span>
-        <span className="footer__note">v1 operating dashboard · mock data</span>
+        <span className="footer__note">
+          v1.1 mining OS · local registry + Forge API
+        </span>
       </footer>
     </div>
   );
@@ -311,7 +469,7 @@ function Section({
 }: {
   id: string;
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <section id={id} className="section" aria-labelledby={`${id}-title`}>
@@ -323,16 +481,6 @@ function Section({
   );
 }
 
-const MINER_STATUS_LABEL: Record<MinerStatus, string> = {
-  online: 'Online',
-  provisioning: 'Provisioning',
-  offline: 'Offline',
-};
-
-function MinerStatusBadge({ status }: { status: MinerStatus }) {
-  return <span className={`badge badge--${status}`}>{MINER_STATUS_LABEL[status]}</span>;
-}
-
 const ASSET_STATUS_LABEL: Record<AssetStatus, string> = {
   active: 'Active',
   planned: 'Planned',
@@ -340,7 +488,11 @@ const ASSET_STATUS_LABEL: Record<AssetStatus, string> = {
 };
 
 function AssetStatusBadge({ status }: { status: AssetStatus }) {
-  return <span className={`badge badge--${status}`}>{ASSET_STATUS_LABEL[status]}</span>;
+  return (
+    <span className={`badge badge--${status}`}>
+      {ASSET_STATUS_LABEL[status]}
+    </span>
+  );
 }
 
 const ROADMAP_STATUS_LABEL: Record<RoadmapStatus, string> = {
@@ -350,11 +502,20 @@ const ROADMAP_STATUS_LABEL: Record<RoadmapStatus, string> = {
 };
 
 function RoadmapDot({ status }: { status: RoadmapStatus }) {
-  return <span className={`roadmap__dot roadmap__dot--${status}`} aria-hidden="true" />;
+  return (
+    <span
+      className={`roadmap__dot roadmap__dot--${status}`}
+      aria-hidden="true"
+    />
+  );
 }
 
 function RoadmapStatusLabel({ status }: { status: RoadmapStatus }) {
-  return <span className={`roadmap__status roadmap__status--${status}`}>{ROADMAP_STATUS_LABEL[status]}</span>;
+  return (
+    <span className={`roadmap__status roadmap__status--${status}`}>
+      {ROADMAP_STATUS_LABEL[status]}
+    </span>
+  );
 }
 
 export default App;
