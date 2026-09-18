@@ -1,0 +1,16 @@
+{
+  "name": "Forge Energy & Compute",
+  "install": "npm ci",
+  "terminals": [
+    {
+      "name": "dev server",
+      "command": "npm run dev"
+    }
+  ],
+  "ports": [
+    {
+      "name": "Vite dev server",
+      "port": 5173
+    }
+  ]
+}
