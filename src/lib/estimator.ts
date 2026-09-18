@@ -1,15 +1,15 @@
 export interface EstimatorInputs {
-  /** Number of GPUs in the cluster. */
-  gpuCount: number;
-  /** Average power draw per GPU, in watts. */
-  wattsPerGpu: number;
-  /** Hours per day the cluster runs under load. */
+  /** Number of machines in the cluster. */
+  deviceCount: number;
+  /** Average power draw per machine, in watts. */
+  wattsPerDevice: number;
+  /** Hours per day the machines run under load. */
   hoursPerDay: number;
   /** Electricity price, in USD per kWh. */
   pricePerKwh: number;
   /**
    * Power Usage Effectiveness of the facility. 1.0 is a perfect data center;
-   * clean, well-designed facilities land around 1.1–1.2.
+   * clean, well-designed facilities land around 1.05–1.2.
    */
   pue: number;
   /** Grid carbon intensity, in kilograms of CO2 per kWh. */
@@ -27,49 +27,31 @@ export interface EstimatorResult {
   facilityKw: number;
 }
 
-const DAYS_PER_MONTH = 30.437;
+/** Average days in a month, shared across the calculation modules. */
+export const DAYS_PER_MONTH = 30.437;
 
 /**
- * Estimate the monthly energy, cost, and carbon footprint of a GPU cluster.
+ * Estimate the monthly energy, cost, and carbon footprint of a fleet of
+ * power-consuming machines (miners or GPUs).
  *
  * Facility energy accounts for overhead (cooling, networking, losses) via PUE,
- * so real-world energy is the raw GPU draw multiplied by the PUE factor.
+ * so real-world energy is the raw device draw multiplied by the PUE factor.
  */
 export function estimate(inputs: EstimatorInputs): EstimatorResult {
   const {
-    gpuCount,
-    wattsPerGpu,
+    deviceCount,
+    wattsPerDevice,
     hoursPerDay,
     pricePerKwh,
     pue,
     carbonKgPerKwh,
   } = inputs;
 
-  const itKw = (gpuCount * wattsPerGpu) / 1000;
+  const itKw = (deviceCount * wattsPerDevice) / 1000;
   const facilityKw = itKw * pue;
   const monthlyKwh = facilityKw * hoursPerDay * DAYS_PER_MONTH;
   const monthlyCost = monthlyKwh * pricePerKwh;
   const monthlyCo2Tonnes = (monthlyKwh * carbonKgPerKwh) / 1000;
 
   return { monthlyKwh, monthlyCost, monthlyCo2Tonnes, facilityKw };
-}
-
-const usd = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  maximumFractionDigits: 0,
-});
-
-const number = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
-
-export function formatUsd(value: number): string {
-  return usd.format(value);
-}
-
-export function formatNumber(value: number): string {
-  return number.format(value);
-}
-
-export function formatTonnes(value: number): string {
-  return `${value.toLocaleString('en-US', { maximumFractionDigits: 1 })} t`;
 }

@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { estimate, formatUsd, type EstimatorInputs } from './estimator';
+import { estimate, type EstimatorInputs } from './estimator';
 
 const base: EstimatorInputs = {
-  gpuCount: 1000,
-  wattsPerGpu: 1000,
+  deviceCount: 1000,
+  wattsPerDevice: 1000,
   hoursPerDay: 24,
   pricePerKwh: 0.1,
   pue: 1.0,
@@ -13,7 +13,7 @@ const base: EstimatorInputs = {
 describe('estimate', () => {
   it('computes facility draw including PUE overhead', () => {
     const result = estimate({ ...base, pue: 1.2 });
-    // 1000 GPUs * 1000 W = 1000 kW IT load, * 1.2 PUE = 1200 kW facility.
+    // 1000 devices * 1000 W = 1000 kW IT load, * 1.2 PUE = 1200 kW facility.
     expect(result.facilityKw).toBeCloseTo(1200, 5);
   });
 
@@ -32,15 +32,9 @@ describe('estimate', () => {
     );
   });
 
-  it('scales linearly with GPU count', () => {
-    const one = estimate({ ...base, gpuCount: 500 });
-    const two = estimate({ ...base, gpuCount: 1000 });
+  it('scales linearly with device count', () => {
+    const one = estimate({ ...base, deviceCount: 500 });
+    const two = estimate({ ...base, deviceCount: 1000 });
     expect(two.monthlyCost).toBeCloseTo(one.monthlyCost * 2, 6);
-  });
-});
-
-describe('formatUsd', () => {
-  it('formats whole-dollar currency', () => {
-    expect(formatUsd(1234.56)).toBe('$1,235');
   });
 });

@@ -1,7 +1,12 @@
 # Forge Energy & Compute
 
-Marketing site and interactive **cluster cost & carbon estimator** for a
-sustainable GPU-compute provider. Built with Vite, React, and TypeScript.
+The operating dashboard for a private Bitcoin mining and energy company —
+a single-page executive command center for the strategy:
+
+**Energy → Compute → Bitcoin → Treasury**
+
+Built with Vite, React, and TypeScript. No backend, database, or auth — all
+figures come from a centralized, editable mock-data layer.
 
 ## Getting started
 
@@ -23,18 +28,35 @@ The dev server binds to `0.0.0.0` and honors the `PORT` environment variable.
 | `npm run typecheck` | Type-check without emitting.                 |
 | `npm run test`      | Run the unit tests with Vitest.              |
 
+## Editing the data
+
+All dashboard figures live in one file — **`src/config/forge.config.ts`**.
+Change BTC holdings, miner quantities, electricity prices, capital allocation,
+the roadmap, etc. there without touching any UI component. When a real API is
+added later, replace the exported values with fetched data of the same shape.
+
 ## Project layout
 
 ```
 src/
-  App.tsx                 # Landing page composition
-  components/Estimator.tsx# Interactive estimator UI
-  lib/estimator.ts        # Pure cost/carbon calculation logic
-  lib/estimator.test.ts   # Unit tests for the calculation logic
+  config/forge.config.ts   # Single source of truth for all mock data
+  lib/
+    mining.ts              # Mining economics + fleet aggregation (pure)
+    treasury.ts            # Treasury valuation & projections (pure)
+    estimator.ts           # Shared energy/carbon math (reused by mining)
+    format.ts              # Display formatters
+    *.test.ts              # Unit tests for the calculation logic
+  components/              # Dashboard UI (StatCard, charts, calculator, ...)
+  App.tsx                 # Single-page dashboard composition
 ```
 
-The estimator math lives in `src/lib/estimator.ts` as pure functions so it can
-be unit-tested independently of the UI.
+Business calculations are pure TypeScript in `src/lib` and covered by unit
+tests, so the numbers can be verified independently of the UI.
+
+## Dashboard sections
+
+Overview · Treasury · Mining · Energy · Capital · Strategy — anchored sections
+on one page, with a live mining economics calculator and local charts.
 
 ## Cloud Agent environment
 
