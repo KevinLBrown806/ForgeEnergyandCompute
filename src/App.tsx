@@ -31,7 +31,6 @@ import {
   formatPercent,
   formatUsd,
   formatUsdCompact,
-  formatUsdPrecise,
 } from './lib/format';
 
 const production = btcPerThPerDay(market.network);
@@ -233,7 +232,7 @@ function App() {
           <div className="grid grid--cards grid--compact">
             <StatCard label="Available Power" value={formatMw(energy.availableMw)} />
             <StatCard label="Deployed Power" value={formatMw(energy.deployedMw)} />
-            <StatCard label="Avg Electricity Rate" value={formatUsdPrecise(energy.avgElectricityRatePerKwh)} hint="per kWh" />
+            <StatCard label="Avg Electricity Rate" value={`$${energy.avgElectricityRatePerKwh.toFixed(3)}`} hint="per kWh" />
             <StatCard label="Miner Load" value={formatMw(minerLoadMw)} />
             <StatCard label="Infra Utilization" value={formatPercent(utilization, 0)} hint="deployed / available" />
           </div>
