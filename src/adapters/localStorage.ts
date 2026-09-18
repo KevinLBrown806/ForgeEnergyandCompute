@@ -1,4 +1,5 @@
 import type { MinerAsset, MinerAssetInput, TreasuryPosition } from '../domain/types';
+import { validateMappedMinerQuantity } from '../domain/fleet';
 import type {
   DemoModeStore,
   FleetRepository,
@@ -36,6 +37,10 @@ function writeJson(key: string, value: unknown): void {
 
 function normalizeAsset(input: MinerAssetInput, existing?: MinerAsset): MinerAsset {
   const ts = nowIso();
+  validateMappedMinerQuantity({
+    quantity: Math.max(1, Math.floor(input.quantity)),
+    braiinsWorkerName: input.braiinsWorkerName,
+  });
   return {
     id: input.id ?? existing?.id ?? newId(),
     model: input.model.trim(),

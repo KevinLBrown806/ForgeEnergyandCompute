@@ -21,7 +21,10 @@ export type AlertKind =
   | 'unmapped_miner'
   | 'unmapped_worker'
   | 'duplicate_mapping'
-  | 'pool_unavailable';
+  | 'pool_unavailable'
+  | 'pool_degraded'
+  | 'auth_required'
+  | 'stale_telemetry';
 
 export interface MinerAsset {
   id: string;
@@ -177,6 +180,20 @@ export interface TreasuryPosition {
   updatedAt: string;
 }
 
+export interface SourceStatus {
+  ok: boolean;
+  error: string | null;
+  fetchedAt: string | null;
+  stale: boolean;
+}
+
+export interface MiningSummarySources {
+  profile: SourceStatus;
+  workers: SourceStatus;
+  rewards: SourceStatus;
+  payouts: SourceStatus;
+}
+
 export interface MiningSummaryResponse {
   ok: boolean;
   configured: boolean;
@@ -185,5 +202,10 @@ export interface MiningSummaryResponse {
   workers: PoolWorker[];
   rewards: MiningReward[];
   payouts: PoolPayout[];
+  sources: MiningSummarySources | null;
+  stale: boolean;
   error: string | null;
+  authRequired?: boolean;
+  authConfigured?: boolean;
+  code?: string;
 }

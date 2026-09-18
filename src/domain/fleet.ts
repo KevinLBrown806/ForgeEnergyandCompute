@@ -1,4 +1,6 @@
 import type {
+  MiningSummarySources,
+  SourceStatus,
   AlertSeverity,
   FleetAggregate,
   FleetRow,
@@ -310,19 +312,56 @@ export function buildOperationsAlerts(args: {
   workers: PoolWorker[];
   poolConfigured: boolean;
   poolError: string | null;
+  sources?: MiningSummarySources | null;
+  stale?: boolean;
   nowMs?: number;
 }): OperationsAlert[] {
   const alerts: OperationsAlert[] = [];
   const { rows, workers, poolConfigured, poolError } = args;
   const nowMs = args.nowMs ?? Date.now();
+  const sources = args.sources ?? null;
 
-  if (poolError) {
+  if (poolError && !sources) {
     alerts.push({
       id: 'pool-unavailable',
       kind: 'pool_unavailable',
       severity: 'warning',
       title: 'Pool telemetry unavailable',
       detail: poolError,
+      assetId: null,
+      workerName: null,
+    });
+  }
+
+  if (sources) {
+    const failed = (Object.entries(sources) as [keyof MiningSummarySources, SourceStatus][])
+      .filter(([, s]) => !s.ok);
+    if (failed.length) {
+      const detail = failed
+        .map(([name, s]) => `${name}: ${s.error ?? 'unavailable'}${s.stale ? ' (serving stale cache)' : ''}`)
+        .join('; ');
+      const workersOk = sources.workers.ok || sources.workers.stale;
+      alerts.push({
+        id: 'pool-degraded',
+        kind: workersOk ? 'pool_degraded' : 'pool_unavailable',
+        severity: workersOk ? 'warning' : 'critical',
+        title: workersOk
+          ? 'Braiins source degraded'
+          : 'Pool worker telemetry unavailable',
+        detail,
+        assetId: null,
+        workerName: null,
+      });
+    }
+  }
+
+  if (args.stale) {
+    alerts.push({
+      id: 'stale-telemetry',
+      kind: 'stale_telemetry',
+      severity: 'info',
+      title: 'Showing stale pool data',
+      detail: 'One or more Braiins sources are serving last-known-good cache after an upstream failure.',
       assetId: null,
       workerName: null,
     });
@@ -427,6 +466,26 @@ export function buildOperationsAlerts(args: {
     info: 2,
   };
   return alerts.sort((a, b) => rank[a.severity] - rank[b.severity]);
+}
+
+
+/**
+ * Braiins operational mapping is 1 physical miner ↔ 1 worker.
+ * Grouped inventory (quantity > 1) is allowed only when unmapped.
+ */
+export function validateMappedMinerQuantity(input: {
+  quantity: number;
+  braiinsWorkerName: string | null | undefined;
+}): void {
+  const mapped = Boolean(input.braiinsWorkerName?.trim());
+  if (mapped && input.quantity !== 1) {
+    throw new Error(
+      'A Braiins-mapped miner must have quantity 1 (one device ↔ one worker). Register additional units as separate assets.',
+    );
+  }
+  if (!Number.isFinite(input.quantity) || input.quantity < 1) {
+    throw new Error('Quantity must be an integer >= 1.');
+  }
 }
 
 export function emptyFleetAggregate(): FleetAggregate {

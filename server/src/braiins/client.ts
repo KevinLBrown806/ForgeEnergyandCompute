@@ -7,10 +7,13 @@ import type {
 import type {
   MiningReward,
   MiningSummaryResponse,
+  MiningSummarySources,
   PoolAccountStats,
   PoolPayout,
   PoolWorker,
+  SourceStatus,
 } from '../types/domain.js';
+import { getEnv } from '../config/env.js';
 import { braiinsCache } from '../services/cache.js';
 import {
   normalizePayouts,
@@ -20,9 +23,7 @@ import {
 } from './normalize.js';
 
 const BRAIINS_BASE = 'https://pool.braiins.com';
-const DEFAULT_TIMEOUT_MS = 12_000;
 const CACHE_TTL_MS = 30_000;
-const DEFAULT_REQUEST_INTERVAL_MS = 5_000;
 
 let requestQueue: Promise<void> = Promise.resolve();
 let nextRequestAt = 0;
@@ -40,24 +41,15 @@ export class BraiinsApiError extends Error {
 }
 
 export function getBraiinsToken(): string | undefined {
-  const token = process.env.BRAIINS_API_TOKEN?.trim();
-  return token || undefined;
+  return getEnv().braiinsToken;
 }
 
 function isoDate(d: Date): string {
   return d.toISOString().slice(0, 10);
 }
 
-function positiveEnvNumber(name: string, fallback: number): number {
-  const parsed = Number(process.env[name]);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
-}
-
 async function waitForRequestSlot(): Promise<void> {
-  const interval = positiveEnvNumber(
-    'BRAIINS_REQUEST_INTERVAL_MS',
-    DEFAULT_REQUEST_INTERVAL_MS,
-  );
+  const interval = getEnv().braiinsRequestIntervalMs;
   const slot = requestQueue.then(async () => {
     const waitMs = Math.max(0, nextRequestAt - Date.now());
     if (waitMs > 0) {
@@ -72,7 +64,7 @@ async function waitForRequestSlot(): Promise<void> {
 export async function braiinsFetch<T>(
   path: string,
   token: string,
-  timeoutMs = positiveEnvNumber('BRAIINS_TIMEOUT_MS', DEFAULT_TIMEOUT_MS),
+  timeoutMs = getEnv().braiinsTimeoutMs,
 ): Promise<T> {
   await waitForRequestSlot();
   const controller = new AbortController();
@@ -94,7 +86,11 @@ export async function braiinsFetch<T>(
       throw new BraiinsApiError('Braiins rate limit exceeded', 502, 'braiins_rate_limit');
     }
     if (!res.ok) {
-      throw new BraiinsApiError(`Braiins request failed (${res.status})`, 502, 'braiins_http');
+      throw new BraiinsApiError(
+        `Braiins request failed (${res.status})`,
+        502,
+        'braiins_http',
+      );
     }
 
     return (await res.json()) as T;
@@ -175,6 +171,70 @@ export async function fetchPayouts(
   return normalized;
 }
 
+const EMPTY_ACCOUNT: PoolAccountStats = {
+  username: null,
+  hashRate5mTh: 0,
+  hashRate60mTh: 0,
+  hashRate24hTh: 0,
+  hashRateYesterdayTh: 0,
+  okWorkers: 0,
+  lowWorkers: 0,
+  offWorkers: 0,
+  disabledWorkers: 0,
+  currentBalanceBtc: 0,
+  todayRewardBtc: 0,
+  estimatedRewardBtc: 0,
+  allTimeRewardBtc: 0,
+  updatedAt: null,
+};
+
+/**
+ * Resolve one Braiins source independently.
+ * On failure, serve soft-expired cache when available and report structured status.
+ */
+async function resolveSource<T>(
+  cacheKey: string,
+  empty: T,
+  load: () => Promise<T>,
+): Promise<{ value: T; status: SourceStatus }> {
+  try {
+    const value = await load();
+    return {
+      value,
+      status: {
+        ok: true,
+        error: null,
+        fetchedAt: new Date().toISOString(),
+        stale: false,
+      },
+    };
+  } catch (err) {
+    const message =
+      err instanceof BraiinsApiError ? err.message : 'Unable to reach Braiins Pool';
+    const stale = braiinsCache.getStale<T>(cacheKey);
+    if (stale) {
+      return {
+        value: stale.value,
+        status: {
+          ok: false,
+          error: message,
+          fetchedAt: new Date(stale.storedAt).toISOString(),
+          stale: true,
+        },
+      };
+    }
+    return {
+      value: empty,
+      status: {
+        ok: false,
+        error: message,
+        fetchedAt: null,
+        stale: false,
+      },
+    };
+  }
+}
+
 export async function fetchMiningSummary(
   token: string | undefined,
 ): Promise<MiningSummaryResponse> {
@@ -187,41 +247,71 @@ export async function fetchMiningSummary(
       workers: [],
       rewards: [],
       payouts: [],
+      sources: null,
+      stale: false,
       error: 'BRAIINS_API_TOKEN is not configured on the server',
     };
   }
 
-  try {
-    const [account, workers, rewards, payouts] = await Promise.all([
-      fetchAccountStats(token),
-      fetchWorkers(token),
-      fetchRewards(token),
-      fetchPayouts(token),
-    ]);
-    return {
-      ok: true,
-      configured: true,
-      fetchedAt: new Date().toISOString(),
-      account,
-      workers,
-      rewards,
-      payouts,
-      error: null,
-    };
-  } catch (err) {
-    const message =
-      err instanceof BraiinsApiError ? err.message : 'Unable to reach Braiins Pool';
-    return {
-      ok: false,
-      configured: true,
-      fetchedAt: new Date().toISOString(),
-      account: null,
-      workers: [],
-      rewards: [],
-      payouts: [],
-      error: message,
-    };
-  }
+  const end = isoDate(new Date());
+  const rewardsStart = isoDate(new Date(Date.now() - 30 * 24 * 60 * 60 * 1000));
+  const payoutsStart = isoDate(new Date(Date.now() - 90 * 24 * 60 * 60 * 1000));
+
+  // Independent source resolution — payout/reward outages must not erase workers.
+  const [profile, workers, rewards, payouts] = await Promise.all([
+    resolveSource('profile', EMPTY_ACCOUNT, () => fetchAccountStats(token)),
+    resolveSource('workers', [] as PoolWorker[], () => fetchWorkers(token)),
+    resolveSource(
+      `rewards:${rewardsStart}:${end}`,
+      [] as MiningReward[],
+      () => fetchRewards(token, rewardsStart, end),
+    ),
+    resolveSource(
+      `payouts:${payoutsStart}:${end}`,
+      [] as PoolPayout[],
+      () => fetchPayouts(token, payoutsStart, end),
+    ),
+  ]);
+
+  const sources: MiningSummarySources = {
+    profile: profile.status,
+    workers: workers.status,
+    rewards: rewards.status,
+    payouts: payouts.status,
+  };
+
+  const usable = (s: SourceStatus) => s.ok || s.stale;
+  const anyData =
+    usable(sources.profile) ||
+    usable(sources.workers) ||
+    usable(sources.rewards) ||
+    usable(sources.payouts);
+
+  const stale =
+    sources.profile.stale ||
+    sources.workers.stale ||
+    sources.rewards.stale ||
+    sources.payouts.stale;
+
+  const errors = [
+    sources.profile.error,
+    sources.workers.error,
+    sources.rewards.error,
+    sources.payouts.error,
+  ].filter((value): value is string => Boolean(value));
+
+  return {
+    ok: anyData,
+    configured: true,
+    fetchedAt: new Date().toISOString(),
+    account: usable(sources.profile) ? profile.value : null,
+    workers: usable(sources.workers) ? workers.value : [],
+    rewards: usable(sources.rewards) ? rewards.value : [],
+    payouts: usable(sources.payouts) ? payouts.value : [],
+    sources,
+    stale,
+    error: errors.length ? `Partial Braiins outage: ${errors.join('; ')}` : null,
+  };
 }
 
 /** Test-only state reset; does not expose or persist credentials. */

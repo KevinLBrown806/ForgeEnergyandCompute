@@ -3,6 +3,7 @@ import {
   aggregateFleet,
   buildFleetRows,
   buildOperationsAlerts,
+  validateMappedMinerQuantity,
   detectDuplicateWorkerMappings,
   findWorkerForAsset,
   workerNamesMatch,
@@ -16,7 +17,7 @@ function asset(overrides: Partial<MinerAsset> = {}): MinerAsset {
     id: 'asset-1',
     model: 'Antminer S21',
     serialNumber: 'S21-001',
-    quantity: 2,
+    quantity: 1,
     nominalHashrateTh: 200,
     wattage: 3500,
     acquisitionDate: null,
@@ -128,9 +129,9 @@ describe('fleet aggregation and alerts', () => {
       nowMs: NOW,
     });
 
-    expect(result.registeredMiners).toBe(2);
-    expect(result.enabledMiners).toBe(2);
-    expect(result.onlineMiners).toBe(2);
+    expect(result.registeredMiners).toBe(1);
+    expect(result.enabledMiners).toBe(1);
+    expect(result.onlineMiners).toBe(1);
     expect(result.currentHashrateTh).toBe(380);
     expect(result.btcEarned7d).toBe(0.01);
   });
@@ -160,5 +161,26 @@ describe('fleet aggregation and alerts', () => {
 
     expect(alerts.some((alert) => alert.kind === 'duplicate_mapping')).toBe(true);
     expect(alerts.some((alert) => alert.kind === 'unmapped_worker')).toBe(true);
+  });
+});
+
+
+describe('mapped miner cardinality', () => {
+  it('requires quantity 1 when a Braiins worker is mapped', () => {
+    expect(() =>
+      validateMappedMinerQuantity({
+        quantity: 2,
+        braiinsWorkerName: 'forge.rack-1',
+      }),
+    ).toThrow(/quantity 1/i);
+  });
+
+  it('allows quantity > 1 for unmapped inventory groups', () => {
+    expect(() =>
+      validateMappedMinerQuantity({
+        quantity: 4,
+        braiinsWorkerName: null,
+      }),
+    ).not.toThrow();
   });
 });

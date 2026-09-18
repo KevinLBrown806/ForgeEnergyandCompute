@@ -1040,3 +1040,88 @@ input[type='range']::-moz-range-thumb {
     grid-template-columns: 1fr;
   }
 }
+
+
+/* Data semantics markers: ACTUAL vs DERIVED vs FORECAST */
+.stat-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.semantics {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  color: var(--muted);
+}
+
+.semantics--actual {
+  color: #1f6b4a;
+  border-color: color-mix(in oklab, #1f6b4a 35%, var(--border));
+  background: color-mix(in oklab, #1f6b4a 10%, transparent);
+}
+
+.semantics--derived {
+  color: #8a5a12;
+  border-color: color-mix(in oklab, #8a5a12 35%, var(--border));
+  background: color-mix(in oklab, #8a5a12 10%, transparent);
+}
+
+.semantics--forecast {
+  color: #1f4f7a;
+  border-color: color-mix(in oklab, #1f4f7a 35%, var(--border));
+  background: color-mix(in oklab, #1f4f7a 10%, transparent);
+}
+
+.semantics--manual,
+.semantics--plan {
+  color: var(--muted);
+}
+
+.auth-panel {
+  margin-bottom: 1.25rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+.auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--panel) 92%, #1f6b4a);
+}
+
+.auth-bar__status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.form-error {
+  color: #9b1c1c;
+  font-size: 0.85rem;
+}
+
+.notice--warning {
+  border-color: color-mix(in oklab, #8a5a12 40%, var(--border));
+  background: color-mix(in oklab, #8a5a12 8%, transparent);
+}

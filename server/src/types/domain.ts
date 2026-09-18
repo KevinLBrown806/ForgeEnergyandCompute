@@ -52,6 +52,22 @@ export interface PoolAccountStats {
   updatedAt: string | null;
 }
 
+export interface SourceStatus {
+  ok: boolean;
+  error: string | null;
+  /** ISO timestamp of the data used (fresh or stale cache). */
+  fetchedAt: string | null;
+  /** True when serving last-known-good data after a fetch failure. */
+  stale: boolean;
+}
+
+export interface MiningSummarySources {
+  profile: SourceStatus;
+  workers: SourceStatus;
+  rewards: SourceStatus;
+  payouts: SourceStatus;
+}
+
 export interface MiningSummaryResponse {
   ok: boolean;
   configured: boolean;
@@ -60,5 +76,12 @@ export interface MiningSummaryResponse {
   workers: PoolWorker[];
   rewards: MiningReward[];
   payouts: PoolPayout[];
+  /** Per-upstream status so one failing endpoint cannot wipe the rest. */
+  sources: MiningSummarySources | null;
+  /** True when any returned field came from soft-expired cache. */
+  stale: boolean;
   error: string | null;
+  authRequired?: boolean;
+  authConfigured?: boolean;
+  code?: string;
 }

@@ -5,6 +5,7 @@ import { FleetRegistry } from './components/FleetRegistry';
 import { MiningCalculator } from './components/MiningCalculator';
 import { Nav } from './components/Nav';
 import { OperationsAlerts } from './components/OperationsAlerts';
+import { OperatorLogin } from './components/OperatorLogin';
 import { StatCard } from './components/StatCard';
 import { TreasuryEditor } from './components/TreasuryEditor';
 import { WorkersPanel } from './components/WorkersPanel';
@@ -46,7 +47,13 @@ import {
 } from './lib/format';
 import { btcPerThPerDay } from './lib/mining';
 import { computeTreasury } from './lib/treasury';
-import { fetchMiningSummary } from './services/forgeApi';
+import {
+  fetchAuthSession,
+  fetchMiningSummary,
+  loginOperator,
+  logoutOperator,
+  type AuthSession,
+} from './services/forgeApi';
 
 const fleetRepository = createLocalFleetRepository();
 const treasuryRepository = createLocalTreasuryRepository();
@@ -60,7 +67,16 @@ const EMPTY_SUMMARY: MiningSummaryResponse = {
   workers: [],
   rewards: [],
   payouts: [],
+  sources: null,
+  stale: false,
   error: null,
+};
+
+const EMPTY_AUTH: AuthSession = {
+  authenticated: false,
+  authConfigured: false,
+  braiinsConfigured: false,
+  authRequired: false,
 };
 
 const DEFAULT_TREASURY: TreasuryPosition = {
@@ -81,6 +97,7 @@ function App() {
     useState<TreasuryPosition>(DEFAULT_TREASURY);
   const [pool, setPool] = useState<MiningSummaryResponse>(EMPTY_SUMMARY);
   const [poolLoading, setPoolLoading] = useState(true);
+  const [authSession, setAuthSession] = useState<AuthSession>(EMPTY_AUTH);
 
   const reloadFleet = useCallback(async () => {
     setStoredAssets(await fleetRepository.list());
@@ -89,11 +106,30 @@ function App() {
   const reloadPool = useCallback(async () => {
     setPoolLoading(true);
     try {
-      setPool(await fetchMiningSummary());
+      const [session, summary] = await Promise.all([
+        fetchAuthSession(),
+        fetchMiningSummary(),
+      ]);
+      setAuthSession(session);
+      setPool(summary);
     } finally {
       setPoolLoading(false);
     }
   }, []);
+
+  const handleLogin = useCallback(async (password: string) => {
+    const result = await loginOperator(password);
+    if (!result.ok) return result.error ?? 'Login failed';
+    await reloadPool();
+    return null;
+  }, [reloadPool]);
+
+  const handleLogout = useCallback(async () => {
+    await logoutOperator();
+    setAuthSession((current) => ({ ...current, authenticated: false }));
+    setPool(EMPTY_SUMMARY);
+    await reloadPool();
+  }, [reloadPool]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -107,9 +143,13 @@ function App() {
       setTreasury(position);
       setDemoMode(isDemo);
     });
-    void fetchMiningSummary(controller.signal)
-      .then((summary) => {
+    void Promise.all([
+      fetchAuthSession(controller.signal),
+      fetchMiningSummary(controller.signal),
+    ])
+      .then(([session, summary]) => {
         if (!controller.signal.aborted) {
+          setAuthSession(session);
           setPool(summary);
           setPoolLoading(false);
         }
@@ -160,8 +200,10 @@ function App() {
         workers: pool.workers,
         poolConfigured: pool.configured,
         poolError: pool.error,
+        sources: pool.sources,
+        stale: pool.stale,
       }),
-    [pool.configured, pool.error, pool.workers, rows],
+    [pool.configured, pool.error, pool.sources, pool.stale, pool.workers, rows],
   );
   const treasuryResult = computeTreasury({
     ...treasury,
@@ -217,35 +259,65 @@ function App() {
           </p>
         </section>
 
-        <Section id="overview" title="Executive overview · actual">
+        
+        {(authSession.authRequired && !authSession.authenticated) ||
+        pool.code === 'auth_required' ||
+        pool.code === 'auth_not_configured' ? (
+          <OperatorLogin
+            authConfigured={authSession.authConfigured || pool.authConfigured === true}
+            onLogin={handleLogin}
+          />
+        ) : null}
+
+        {authSession.authenticated && (
+          <div className="auth-bar">
+            <span className="auth-bar__status">Operator session active</span>
+            <button className="button" type="button" onClick={() => void handleLogout()}>
+              Sign out
+            </button>
+          </div>
+        )}
+
+        {pool.stale && (
+          <p className="notice notice--warning">
+            Showing stale Braiins cache for one or more sources after a partial upstream failure.
+          </p>
+        )}
+
+        <Section id="overview" title="Executive overview">
           <div className="grid grid--cards">
             <StatCard
-              label="Registered Miners · Actual"
+              label="Registered Miners"
+              semantics="actual"
               value={formatNumber(aggregate.registeredMiners)}
               hint={`${aggregate.enabledMiners} enabled`}
             />
             <StatCard
-              label="Online Miners · Actual"
+              label="Online Miners"
+              semantics="actual"
               value={formatNumber(aggregate.onlineMiners)}
               hint={`${aggregate.degradedMiners} degraded · ${aggregate.offlineMiners} offline`}
               tone={aggregate.offlineMiners ? 'negative' : 'positive'}
             />
             <StatCard
-              label="Pool Hashrate 5m · Actual"
+              label="Pool Hashrate 5m"
+              semantics="actual"
               value={formatHashrate(aggregate.currentHashrateTh)}
               hint={`${formatHashrate(aggregate.expectedHashrateTh)} expected`}
             />
             <StatCard
-              label="Fleet Efficiency · Actual"
+              label="Fleet Efficiency"
+              semantics="derived"
               value={
                 aggregate.fleetEfficiencyPct == null
                   ? '—'
                   : formatPercent(aggregate.fleetEfficiencyPct)
               }
-              hint="5m hashrate / registered nominal"
+              hint="Derived: 5m hashrate / registered nominal"
             />
             <StatCard
-              label="BTC Earned Today · Actual"
+              label="BTC Earned Today"
+              semantics="actual"
               value={
                 aggregate.btcEarnedToday == null
                   ? '—'
@@ -254,7 +326,8 @@ function App() {
               tone="btc"
             />
             <StatCard
-              label="BTC Earned 30d · Actual"
+              label="BTC Earned 30d"
+              semantics="actual"
               value={
                 aggregate.btcEarned30d == null
                   ? '—'
@@ -263,7 +336,8 @@ function App() {
               tone="btc"
             />
             <StatCard
-              label="Unpaid Pool Balance · Actual"
+              label="Unpaid Pool Balance"
+              semantics="actual"
               value={
                 aggregate.unpaidBalanceBtc == null
                   ? '—'
@@ -271,11 +345,12 @@ function App() {
               }
             />
             <StatCard
-              label="Mining Contribution · Actual"
+              label="Mining Contribution"
+              semantics="derived"
               value={formatUsdCompact(
                 aggregate.miningContributionMonthlyUsd,
               )}
-              hint="Live 24h production less registered costs"
+              hint="Derived from live hashrate × power costs — not settled revenue"
               tone={
                 aggregate.miningContributionMonthlyUsd >= 0
                   ? 'positive'
@@ -371,11 +446,11 @@ function App() {
           <div className="panel calculator-panel">
             <div className="panel__head">
               <div>
-                <p className="eyebrow">Forecast / scenario</p>
+                <p className="eyebrow">FORECAST / SCENARIO</p>
                 <h3>Mining economics calculator</h3>
               </div>
               <span className="panel__meta">
-                Assumptions only · not operating fleet data
+                Forecast model only · not ACTUAL pool revenue
               </span>
             </div>
             <MiningCalculator />

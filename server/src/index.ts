@@ -1,8 +1,16 @@
 import express from 'express';
+import { loadEnv } from './config/env.js';
 import { applySecurity } from './middleware/security.js';
 import { apiRouter } from './routes/api.js';
 
-const port = Number(process.env.PORT) || 8787;
+let env;
+try {
+  env = loadEnv();
+} catch (err) {
+  const message = err instanceof Error ? err.message : 'Invalid environment';
+  console.error(`Forge API refused to start: ${message}`);
+  process.exit(1);
+}
 
 const app = express();
 app.disable('x-powered-by');
@@ -12,7 +20,7 @@ applySecurity(app);
 app.get('/', (_req, res) => {
   res.json({
     service: 'forge-api',
-    docs: 'GET /api/health, /api/mining/summary, /api/braiins/*',
+    docs: 'GET /api/health, /api/auth/session, /api/mining/summary, /api/braiins/*',
   });
 });
 
@@ -22,8 +30,8 @@ app.use((_req, res) => {
   res.status(404).json({ error: 'Not found' });
 });
 
-app.listen(port, '0.0.0.0', () => {
-  // Do not log token presence details beyond configured boolean.
-  const configured = Boolean(process.env.BRAIINS_API_TOKEN?.trim());
-  console.log(`Forge API listening on 0.0.0.0:${port} (braiins configured=${configured})`);
+app.listen(env.port, '0.0.0.0', () => {
+  console.log(
+    `Forge API listening on 0.0.0.0:${env.port} (braiins=${env.braiinsConfigured}, auth=${env.authConfigured})`,
+  );
 });

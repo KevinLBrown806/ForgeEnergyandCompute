@@ -87,6 +87,46 @@ Runtime variables:
 | `BRAIINS_REQUEST_INTERVAL_MS` | Optional upstream request-spacing override |
 | `VITE_FORGE_API_BASE_URL` | Public Forge API origin used by the frontend |
 
+
+## Authentication & production gate
+
+CORS is **not** authentication. When `BRAIINS_API_TOKEN` is set, Forge requires an
+operator session before serving `/api/mining/summary` or `/api/braiins/*`.
+
+Architecture:
+
+1. Operator signs in with `FORGE_OPERATOR_PASSWORD` via `POST /api/auth/login`.
+2. Server sets an **HttpOnly** signed session cookie (`FORGE_SESSION_SECRET`).
+3. Browser calls use `credentials: "include"`. No API password/token is placed in
+   Vite env, JS bundles, `localStorage`, or query strings.
+4. Do **not** create `VITE_FORGE_SECRET` or any `VITE_BRAIINS_*` variable.
+
+Production fail-closed rules:
+
+- If `BRAIINS_API_TOKEN` is set and `NODE_ENV=production`, startup refuses to boot
+  unless both `FORGE_OPERATOR_PASSWORD` and `FORGE_SESSION_SECRET` are set.
+- `CORS_ORIGINS=*` is rejected when Braiins is configured or in production.
+- CORS remains an additional browser restriction, not the security boundary.
+
+### Miner ↔ worker cardinality
+
+Braiins operational mapping is **one physical miner ↔ one worker**. Mapped assets
+must use `quantity: 1`. Grouped inventory (`quantity > 1`) is allowed only when
+unmapped. Bulk import can come later without compromising health/economics math.
+
+### Partial Braiins outages
+
+`fetchMiningSummary` resolves profile / workers / rewards / payouts independently.
+A payouts or rewards failure does not erase worker telemetry. The API returns
+`sources: { profile, workers, rewards, payouts }` with per-source `ok` / `error` /
+`stale`, and keeps last-known-good cache where available.
+
+### ACTUAL vs DERIVED vs FORECAST
+
+- **ACTUAL** — worker state, hashrates, shares, pool rewards, payouts, balances
+- **DERIVED** — estimated revenue/cost/net from live hashrate (not settled revenue)
+- **FORECAST** — Mining Calculator scenarios only
+
 ## Deployment
 
 ### Render API
@@ -97,9 +137,12 @@ Runtime variables:
 
 1. Create/sync the Render Blueprint.
 2. Set `BRAIINS_API_TOKEN` as a secret environment variable.
-3. Set `CORS_ORIGINS` to the exact Netlify production URL and any approved
-   preview/custom-domain origins, comma-separated.
-4. Confirm `/api/health` returns `ok: true`.
+3. Set `FORGE_OPERATOR_PASSWORD` and `FORGE_SESSION_SECRET` (required in
+   production whenever Braiins is enabled).
+4. Set `CORS_ORIGINS` to the exact Netlify production URL and any approved
+   preview/custom-domain origins, comma-separated. Do not use `*`.
+5. Confirm `/api/health` returns `ok: true`, then sign in from the UI before
+   expecting live telemetry.
 
 The service filesystem is not used for persistent data.
 
