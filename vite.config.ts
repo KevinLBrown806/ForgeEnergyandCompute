@@ -20,4 +20,9 @@ export default defineConfig({
     host: '0.0.0.0',
     port,
   },
+  test: {
+    environment: 'node',
+    include: ['src/**/*.test.ts'],
+    exclude: ['server/**', 'node_modules/**', 'dist/**'],
+  },
 })
