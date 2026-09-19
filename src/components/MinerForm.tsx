@@ -58,6 +58,14 @@ export function MinerForm({
   return (
     <form className="miner-form" onSubmit={submit}>
       <label>
+        Manufacturer
+        <input
+          value={form.manufacturer}
+          placeholder="Bitmain / MicroBT / …"
+          onChange={(event) => set('manufacturer', event.target.value)}
+        />
+      </label>
+      <label>
         Model
         <input
           required
@@ -121,11 +129,26 @@ export function MinerForm({
             set('status', event.target.value as MinerAsset['status'])
           }
         >
-          <option value="active">Active</option>
-          <option value="maintenance">Maintenance</option>
+          <option value="active">Online (active)</option>
+          <option value="maintenance">Repair</option>
+          <option value="ordered">Ordered</option>
           <option value="spare">Spare</option>
           <option value="retired">Retired</option>
+          <option value="decommissioned">Decommissioned</option>
         </select>
+      </label>
+      <label>
+        Efficiency (J/TH)
+        <input
+          min={0}
+          step={0.1}
+          type="number"
+          value={form.efficiencyJTh ?? ''}
+          placeholder="Auto from W ÷ TH"
+          onChange={(event) =>
+            set('efficiencyJTh', nullableNumber(event.target.value))
+          }
+        />
       </label>
       <label>
         Hosting provider

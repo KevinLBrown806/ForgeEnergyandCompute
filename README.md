@@ -1,25 +1,43 @@
 # Forge Energy & Compute
 
-Forge is a mining operations dashboard for the strategy:
+Forge OS is a mining operations dashboard for the strategy:
 
-**Energy → Compute → Bitcoin → Treasury**
+**Energy → Compute → Bitcoin → Treasury → Infrastructure**
 
 The React frontend maintains a local fleet registry, combines registered
 inventory with Braiins Pool telemetry from the Forge API, and keeps the mining
-calculator explicitly separated as a forecast/scenario tool.
+calculator explicitly separated as a modeled/scenario tool.
+
+## Data provenance
+
+Every primary KPI is tagged:
+
+| Source | Meaning |
+| --- | --- |
+| **LIVE** | Automatically sourced from an external system (e.g. Braiins) |
+| **MANUAL** | Entered from Forge company records (registry / treasury editor) |
+| **MODELED** | Calculated using assumptions or scenarios |
 
 ## Architecture
 
-- `src/domain/` — canonical fleet, worker, reward, payout, alert, and treasury
-  DTOs plus pure matching/health/aggregation logic.
-- `src/adapters/localStorage.ts` — browser persistence behind repository
-  interfaces. Fleet and manual treasury values never masquerade as server data.
-- `src/services/forgeApi.ts` — the only frontend path to pool telemetry.
-- `server/` — Node/TypeScript Forge API. The Braiins token stays server-side.
-- `src/lib/mining.ts` — the existing forecast/scenario calculator.
+- `src/config/forge.config.ts` — domain-organized `forgeData` (company, actuals, fleet, treasury, energy, market, assumptions, scenarios, roadmap)
+- `src/domain/` — canonical fleet, worker, reward, payout, alert, and treasury DTOs plus pure matching/health/aggregation logic
+- `src/domain/dataSource.ts` — `LIVE` / `MANUAL` / `MODELED` provenance types
+- `src/data/providers/` — swap-ready market, mining-pool, and accounting adapters
+- `src/adapters/localStorage.ts` — browser persistence behind repository interfaces
+- `src/services/forgeApi.ts` — the only frontend path to pool telemetry
+- `src/lib/mining.ts` — pure mining economics engine (forecast + ledger projections)
+- `src/lib/treasury.ts` — treasury valuation & Forge NAV
+- `server/` — Node/TypeScript Forge API (Braiins token stays server-side)
 
 The default fleet and treasury are empty. Demo mode is opt-in and clearly
 labeled; demo assets are not written to the operating registry.
+
+## Editing operating data
+
+1. **Fleet** — Dashboard → Fleet operations → + Add Miner (preferred), or Demo mode for placeholders in `src/config/demoFleet.ts`
+2. **Treasury** — Manual treasury editor (BTC held, mined, purchased, sold, cash, hardware book value, liabilities)
+3. **Market assumptions** — `forgeData.market` in `src/config/forge.config.ts` (MODELED until LIVE feeds connect)
 
 ## Local development
 
@@ -133,11 +151,11 @@ A payouts or rewards failure does not erase worker telemetry. The API returns
 `sources: { profile, workers, rewards, payouts }` with per-source `ok` / `error` /
 `stale`, and keeps last-known-good cache where available.
 
-### ACTUAL vs DERIVED vs FORECAST
+### LIVE vs MANUAL vs MODELED
 
-- **ACTUAL** — worker state, hashrates, shares, pool rewards, payouts, balances
-- **DERIVED** — estimated revenue/cost/net from live hashrate (not settled revenue)
-- **FORECAST** — Mining Calculator scenarios only
+- **LIVE** — worker state, hashrates, shares, pool rewards, payouts, balances
+- **MANUAL** — fleet registry inventory, treasury holdings, cost basis, cash
+- **MODELED** — estimated revenue/cost/EBITDA from hashrate × assumptions; calculator scenarios
 
 ## Deployment
 

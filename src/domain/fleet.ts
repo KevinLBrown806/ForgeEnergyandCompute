@@ -58,9 +58,26 @@ export function findWorkerForAsset(
   );
 }
 
+/** Assets that can contribute to live production when enabled. */
+export function isProductionEligible(asset: MinerAsset): boolean {
+  return (
+    asset.enabled &&
+    asset.status === 'active'
+  );
+}
+
 export function expectedHashrateTh(asset: MinerAsset): number {
-  if (!asset.enabled || asset.status !== 'active') return 0;
+  if (!isProductionEligible(asset)) return 0;
   return asset.quantity * asset.nominalHashrateTh;
+}
+
+/** Datasheet or derived efficiency in J/TH. */
+export function efficiencyJTh(asset: MinerAsset): number {
+  if (asset.efficiencyJTh != null && asset.efficiencyJTh > 0) {
+    return asset.efficiencyJTh;
+  }
+  if (asset.nominalHashrateTh <= 0) return 0;
+  return asset.wattage / asset.nominalHashrateTh;
 }
 
 export function deriveHealth(args: {
@@ -71,7 +88,7 @@ export function deriveHealth(args: {
   const { asset, worker } = args;
   const now = args.nowMs ?? Date.now();
 
-  if (!asset.enabled || asset.status !== 'active') {
+  if (!isProductionEligible(asset)) {
     return 'NO_DATA';
   }
 
@@ -113,7 +130,7 @@ export function dailyPowerCostUsd(
   asset: MinerAsset,
   defaultRatePerKwh: number,
 ): number {
-  if (!asset.enabled || asset.status !== 'active') return 0;
+  if (!isProductionEligible(asset)) return 0;
   const rate = asset.electricityRatePerKwh ?? defaultRatePerKwh;
   const kwhPerDay = (asset.quantity * asset.wattage * 24) / 1000;
   const hostingPerDay = (asset.monthlyHostingFeeUsd ?? 0) / DAYS_PER_MONTH;
@@ -213,9 +230,7 @@ export function aggregateFleet(args: {
   nowMs?: number;
 }): FleetAggregate {
   const now = args.nowMs ?? Date.now();
-  const enabled = args.rows.filter(
-    (r) => r.asset.enabled && r.asset.status === 'active',
-  );
+  const enabled = args.rows.filter((r) => isProductionEligible(r.asset));
 
   const expectedHashrateThSum = enabled.reduce(
     (s, r) => s + r.expectedHashrateTh,
@@ -380,7 +395,7 @@ export function buildOperationsAlerts(args: {
   }
 
   for (const row of rows) {
-    if (!row.asset.enabled || row.asset.status !== 'active') continue;
+    if (!isProductionEligible(row.asset)) continue;
 
     if (row.health === 'OFFLINE') {
       const lastShareMs = row.worker?.lastShareAt

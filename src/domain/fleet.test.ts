@@ -15,11 +15,13 @@ const NOW = Date.parse('2026-09-18T20:00:00.000Z');
 function asset(overrides: Partial<MinerAsset> = {}): MinerAsset {
   return {
     id: 'asset-1',
+    manufacturer: 'Bitmain',
     model: 'Antminer S21',
     serialNumber: 'S21-001',
     quantity: 1,
     nominalHashrateTh: 200,
     wattage: 3500,
+    efficiencyJTh: 17.5,
     acquisitionDate: null,
     acquisitionCostUsd: null,
     hostingProvider: '',
@@ -134,6 +136,43 @@ describe('fleet aggregation and alerts', () => {
     expect(result.onlineMiners).toBe(1);
     expect(result.currentHashrateTh).toBe(380);
     expect(result.btcEarned7d).toBe(0.01);
+  });
+
+  it('excludes ordered and decommissioned machines from active production', () => {
+    const rows = buildFleetRows({
+      assets: [
+        asset(),
+        asset({
+          id: 'ordered',
+          status: 'ordered',
+          enabled: false,
+          braiinsWorkerName: null,
+          quantity: 4,
+        }),
+        asset({
+          id: 'decom',
+          status: 'decommissioned',
+          enabled: false,
+          braiinsWorkerName: null,
+          quantity: 2,
+        }),
+      ],
+      workers: [worker()],
+      ...economics,
+      nowMs: NOW,
+    });
+    const result = aggregateFleet({
+      rows,
+      rewards: [],
+      payouts: [],
+      unpaidBalanceBtc: null,
+      btcEarnedToday: null,
+      nowMs: NOW,
+    });
+
+    expect(result.registeredMiners).toBe(7);
+    expect(result.enabledMiners).toBe(1);
+    expect(result.expectedHashrateTh).toBe(200);
   });
 
   it('detects duplicate aliases and unmapped pool workers', () => {
