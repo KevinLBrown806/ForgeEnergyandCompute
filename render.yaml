@@ -1,0 +1,29 @@
+services:
+  - type: web
+    name: forge-api
+    runtime: node
+    plan: free
+    rootDir: server
+    buildCommand: npm ci && npm run build
+    startCommand: npm start
+    healthCheckPath: /api/health
+    autoDeployTrigger: checksPass
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: BRAIINS_API_TOKEN
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+      - key: FORGE_OPERATOR_PASSWORD
+        sync: false
+      - key: FORGE_SESSION_SECRET
+        sync: false
+      - key: FORGE_COOKIE_SAMESITE
+        value: "lax"
+      - key: RATE_LIMIT_PER_MINUTE
+        value: "60"
+      - key: BRAIINS_TIMEOUT_MS
+        value: "12000"
+      - key: BRAIINS_REQUEST_INTERVAL_MS
+        value: "5000"

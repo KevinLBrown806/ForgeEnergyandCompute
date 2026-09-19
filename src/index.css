@@ -460,6 +460,27 @@ a {
   color: var(--text-faint);
 }
 
+.table-groups th {
+  color: var(--btc);
+  background: var(--bg);
+}
+
+.cell-sub {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 400;
+}
+
+.empty-state {
+  margin: 0;
+  padding: 18px;
+  color: var(--text-faint);
+  text-align: center;
+}
+
 /* Badges */
 .badge {
   display: inline-block;
@@ -496,6 +517,215 @@ a {
   background: var(--bg-elev-2);
   border-color: var(--border);
 }
+
+.badge--maintenance,
+.badge--degraded,
+.badge--warning,
+.badge--low {
+  color: var(--btc);
+  background: rgba(247, 147, 26, 0.1);
+  border-color: rgba(247, 147, 26, 0.3);
+}
+
+.badge--retired,
+.badge--spare,
+.badge--no_data,
+.badge--unmapped,
+.badge--info,
+.badge--manual,
+.badge--dis,
+.badge--disabled,
+.badge--unknown {
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  border-color: var(--border);
+}
+
+.badge--critical,
+.badge--off {
+  color: var(--neg);
+  background: rgba(255, 107, 107, 0.1);
+  border-color: rgba(255, 107, 107, 0.3);
+}
+
+/* Fleet registry and operating panels */
+.registry-toolbar,
+.toolbar-actions,
+.row-actions,
+.form-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.registry-toolbar {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.toolbar-actions,
+.form-actions {
+  flex-wrap: wrap;
+}
+
+.button,
+.row-actions button {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 7px 11px;
+}
+
+.button:hover,
+.row-actions button:hover {
+  border-color: var(--text-faint);
+}
+
+.button--primary {
+  border-color: rgba(247, 147, 26, 0.5);
+  background: rgba(247, 147, 26, 0.12);
+  color: var(--btc);
+}
+
+.button:disabled,
+.row-actions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.row-actions {
+  flex-wrap: nowrap;
+}
+
+.row-actions button {
+  background: transparent;
+  padding: 4px 7px;
+}
+
+.miner-form {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.miner-form label,
+.treasury-editor label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+}
+
+.miner-form input,
+.miner-form select,
+.miner-form textarea,
+.treasury-editor input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font: inherit;
+  padding: 8px 10px;
+}
+
+.miner-form textarea {
+  resize: vertical;
+}
+
+.miner-form__wide,
+.form-actions {
+  grid-column: 1 / -1;
+}
+
+.check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-dim);
+  font-size: 0.8rem;
+}
+
+.check input {
+  width: auto;
+}
+
+.notice {
+  margin: 12px 0;
+  border: 1px solid rgba(247, 147, 26, 0.25);
+  border-radius: 8px;
+  background: rgba(247, 147, 26, 0.07);
+  color: var(--text-dim);
+  font-size: 0.8rem;
+  padding: 10px 12px;
+}
+
+.overview-alerts,
+.treasury-chart,
+.calculator-panel {
+  margin-top: 12px;
+}
+
+.alerts {
+  display: grid;
+  gap: 8px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.alert {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border-left: 3px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  padding: 11px 12px;
+}
+
+.alert--critical {
+  border-left-color: var(--neg);
+}
+
+.alert--warning {
+  border-left-color: var(--btc);
+}
+
+.alert--info {
+  border-left-color: var(--blue);
+}
+
+.alert p {
+  margin: 3px 0 0;
+  color: var(--text-dim);
+  font-size: 0.78rem;
+}
+
+.panel__head--padded {
+  padding: 12px 12px 0;
+}
+
+.treasury-editor__fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.chart--empty {
+  display: grid;
+  min-height: 160px;
+  place-items: center;
+  color: var(--text-faint);
+  font-size: 0.82rem;
+}
+
 
 /* Calculator */
 .calc {
@@ -777,6 +1007,9 @@ input[type='range']::-moz-range-thumb {
   .calc__results {
     grid-template-columns: 1fr;
   }
+  .miner-form {
+    grid-template-columns: 1fr 1fr;
+  }
 }
 
 @media (max-width: 620px) {
@@ -798,4 +1031,97 @@ input[type='range']::-moz-range-thumb {
   .lede-row {
     padding-top: 16px;
   }
+  .registry-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .miner-form,
+  .treasury-editor__fields {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Data semantics markers: ACTUAL vs DERIVED vs FORECAST */
+.stat-card__head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.semantics {
+  flex-shrink: 0;
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  padding: 0.15rem 0.4rem;
+  border: 1px solid color-mix(in oklab, var(--border) 80%, transparent);
+  color: var(--muted);
+}
+
+.semantics--actual {
+  color: #1f6b4a;
+  border-color: color-mix(in oklab, #1f6b4a 35%, var(--border));
+  background: color-mix(in oklab, #1f6b4a 10%, transparent);
+}
+
+.semantics--derived {
+  color: #8a5a12;
+  border-color: color-mix(in oklab, #8a5a12 35%, var(--border));
+  background: color-mix(in oklab, #8a5a12 10%, transparent);
+}
+
+.semantics--forecast {
+  color: #1f4f7a;
+  border-color: color-mix(in oklab, #1f4f7a 35%, var(--border));
+  background: color-mix(in oklab, #1f4f7a 10%, transparent);
+}
+
+.semantics--manual,
+.semantics--plan {
+  color: var(--muted);
+}
+
+.auth-panel {
+  margin-bottom: 1.25rem;
+}
+
+.auth-form {
+  display: grid;
+  gap: 0.75rem;
+  max-width: 24rem;
+}
+
+.auth-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1rem;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--border);
+  background: color-mix(in oklab, var(--panel) 92%, #1f6b4a);
+}
+
+.auth-bar__status {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.field-hint {
+  display: block;
+  margin-top: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--muted);
+}
+
+.form-error {
+  color: #9b1c1c;
+  font-size: 0.85rem;
+}
+
+.notice--warning {
+  border-color: color-mix(in oklab, #8a5a12 40%, var(--border));
+  background: color-mix(in oklab, #8a5a12 8%, transparent);
 }

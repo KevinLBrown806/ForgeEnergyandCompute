@@ -9,7 +9,12 @@
     "preview": "vite preview",
     "lint": "oxlint",
     "typecheck": "tsc -b",
-    "test": "vitest run"
+    "test": "vitest run",
+    "server:dev": "npm --prefix server run dev",
+    "server:lint": "npm --prefix server run lint",
+    "server:typecheck": "npm --prefix server run typecheck",
+    "server:test": "npm --prefix server run test",
+    "server:build": "npm --prefix server run build"
   },
   "dependencies": {
     "react": "^19.2.8",
