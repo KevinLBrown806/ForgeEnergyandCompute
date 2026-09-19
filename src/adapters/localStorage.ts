@@ -43,11 +43,17 @@ function normalizeAsset(input: MinerAssetInput, existing?: MinerAsset): MinerAss
   });
   return {
     id: input.id ?? existing?.id ?? newId(),
+    manufacturer: (input.manufacturer ?? existing?.manufacturer ?? '').trim(),
     model: input.model.trim(),
     serialNumber: input.serialNumber.trim(),
+    serialNumbers: input.serialNumbers ?? existing?.serialNumbers,
     quantity: Math.max(1, Math.floor(input.quantity)),
     nominalHashrateTh: Math.max(0, input.nominalHashrateTh),
     wattage: Math.max(0, input.wattage),
+    efficiencyJTh:
+      input.efficiencyJTh === undefined
+        ? (existing?.efficiencyJTh ?? null)
+        : input.efficiencyJTh,
     acquisitionDate: input.acquisitionDate || null,
     acquisitionCostUsd: input.acquisitionCostUsd,
     hostingProvider: input.hostingProvider.trim(),
@@ -106,23 +112,53 @@ export function createLocalFleetRepository(): FleetRepository {
 const DEFAULT_TREASURY: TreasuryPosition = {
   btcHoldings: 0,
   avgAcquisitionPriceUsd: 0,
+  btcMined: 0,
+  btcPurchased: 0,
+  btcSold: 0,
+  btcTransferred: 0,
+  btcCostBasisUsd: null,
+  cashReserveUsd: 0,
+  minerHardwareBookValueUsd: 0,
+  otherAssetsUsd: 0,
+  liabilitiesUsd: 0,
   monthlyAccumulationBtc: 0,
   targetBtc: 250,
   source: 'manual',
   updatedAt: new Date(0).toISOString(),
 };
 
+function normalizeTreasury(raw: Partial<TreasuryPosition> | null): TreasuryPosition {
+  const base = { ...DEFAULT_TREASURY, ...(raw ?? {}) };
+  return {
+    btcHoldings: base.btcHoldings ?? 0,
+    avgAcquisitionPriceUsd: base.avgAcquisitionPriceUsd ?? 0,
+    btcMined: base.btcMined ?? 0,
+    btcPurchased: base.btcPurchased ?? 0,
+    btcSold: base.btcSold ?? 0,
+    btcTransferred: base.btcTransferred ?? 0,
+    btcCostBasisUsd: base.btcCostBasisUsd ?? null,
+    cashReserveUsd: base.cashReserveUsd ?? 0,
+    minerHardwareBookValueUsd: base.minerHardwareBookValueUsd ?? 0,
+    otherAssetsUsd: base.otherAssetsUsd ?? 0,
+    liabilitiesUsd: base.liabilitiesUsd ?? 0,
+    monthlyAccumulationBtc: base.monthlyAccumulationBtc ?? 0,
+    targetBtc: base.targetBtc ?? 250,
+    source: 'manual',
+    updatedAt: base.updatedAt ?? new Date(0).toISOString(),
+  };
+}
+
 export function createLocalTreasuryRepository(): TreasuryRepository {
   return {
     async get() {
-      return readJson<TreasuryPosition>(TREASURY_KEY, DEFAULT_TREASURY);
+      return normalizeTreasury(readJson<Partial<TreasuryPosition> | null>(TREASURY_KEY, null));
     },
     async save(position) {
-      const next: TreasuryPosition = {
+      const next = normalizeTreasury({
         ...position,
         source: 'manual',
         updatedAt: nowIso(),
-      };
+      });
       writeJson(TREASURY_KEY, next);
       return next;
     },
