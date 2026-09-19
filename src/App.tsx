@@ -399,14 +399,14 @@ function App() {
                   ? formatBtc(btcMinedMtdLive)
                   : btcMinedMtdModeled > 0
                     ? formatBtc(btcMinedMtdModeled, 3)
-                    : '—'
+                    : NOT_TRACKED
               }
               hint={
                 hasLiveMtd
                   ? 'Pool rewards · 30d'
                   : btcMinedMtdModeled > 0
                     ? 'Modeled from hashrate · not settled'
-                    : NOT_TRACKED
+                    : 'No pool rewards or modeled production yet'
               }
               tone="btc"
             />
