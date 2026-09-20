@@ -60,10 +60,7 @@ export function findWorkerForAsset(
 
 /** Assets that can contribute to live production when enabled. */
 export function isProductionEligible(asset: MinerAsset): boolean {
-  return (
-    asset.enabled &&
-    asset.status === 'active'
-  );
+  return asset.enabled && (asset.status === 'active' || asset.status === 'online');
 }
 
 export function expectedHashrateTh(asset: MinerAsset): number {

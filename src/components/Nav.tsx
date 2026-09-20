@@ -6,6 +6,7 @@ const LINKS = [
   { href: '#energy', label: 'Energy' },
   { href: '#capital', label: 'Capital' },
   { href: '#strategy', label: 'Strategy' },
+  { href: '#data', label: 'Data' },
 ];
 
 export function Nav() {

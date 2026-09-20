@@ -104,6 +104,114 @@ export async function logoutOperator(): Promise<void> {
   }
 }
 
+export interface MarketSnapshotResponse {
+  ok: boolean;
+  btcPriceUsd: number | null;
+  change24hPct: number | null;
+  timestamp: string | null;
+  provider: string;
+  source: string;
+  fetchedAt: string | null;
+  stale: boolean;
+  error: string | null;
+}
+
+export interface NetworkSnapshotResponse {
+  ok: boolean;
+  networkHashrateEhs: number | null;
+  difficulty: number | null;
+  blockHeight: number | null;
+  blockSubsidyBtc: number | null;
+  blocksPerDay: number | null;
+  nextDifficultyChangePct: number | null;
+  estimatedRetargetDate: string | null;
+  remainingBlocks: number | null;
+  daysUntilAdjustment: number | null;
+  provider: string;
+  source: string;
+  fetchedAt: string | null;
+  stale: boolean;
+  error: string | null;
+}
+
+export async function fetchMarketSnapshot(
+  signal?: AbortSignal,
+): Promise<MarketSnapshotResponse> {
+  try {
+    const response = await apiFetch('/api/market/snapshot', { signal });
+    const body = (await response.json()) as MarketSnapshotResponse;
+    return {
+      ok: Boolean(body.ok),
+      btcPriceUsd: body.btcPriceUsd ?? null,
+      change24hPct: body.change24hPct ?? null,
+      timestamp: body.timestamp ?? null,
+      provider: body.provider ?? 'coingecko',
+      source: body.source ?? 'MODELED',
+      fetchedAt: body.fetchedAt ?? null,
+      stale: Boolean(body.stale),
+      error: body.error ?? (response.ok ? null : `Forge API returned ${response.status}`),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return {
+      ok: false,
+      btcPriceUsd: null,
+      change24hPct: null,
+      timestamp: null,
+      provider: 'coingecko',
+      source: 'MODELED',
+      fetchedAt: null,
+      stale: false,
+      error: 'Forge API is unavailable',
+    };
+  }
+}
+
+export async function fetchNetworkSnapshot(
+  signal?: AbortSignal,
+): Promise<NetworkSnapshotResponse> {
+  try {
+    const response = await apiFetch('/api/network/snapshot', { signal });
+    const body = (await response.json()) as NetworkSnapshotResponse;
+    return {
+      ok: Boolean(body.ok),
+      networkHashrateEhs: body.networkHashrateEhs ?? null,
+      difficulty: body.difficulty ?? null,
+      blockHeight: body.blockHeight ?? null,
+      blockSubsidyBtc: body.blockSubsidyBtc ?? null,
+      blocksPerDay: body.blocksPerDay ?? 144,
+      nextDifficultyChangePct: body.nextDifficultyChangePct ?? null,
+      estimatedRetargetDate: body.estimatedRetargetDate ?? null,
+      remainingBlocks: body.remainingBlocks ?? null,
+      daysUntilAdjustment: body.daysUntilAdjustment ?? null,
+      provider: body.provider ?? 'mempool.space',
+      source: body.source ?? 'MODELED',
+      fetchedAt: body.fetchedAt ?? null,
+      stale: Boolean(body.stale),
+      error: body.error ?? (response.ok ? null : `Forge API returned ${response.status}`),
+    };
+  } catch (error) {
+    if (error instanceof DOMException && error.name === 'AbortError') throw error;
+    return {
+      ok: false,
+      networkHashrateEhs: null,
+      difficulty: null,
+      blockHeight: null,
+      blockSubsidyBtc: null,
+      blocksPerDay: 144,
+      nextDifficultyChangePct: null,
+      estimatedRetargetDate: null,
+      remainingBlocks: null,
+      daysUntilAdjustment: null,
+      provider: 'mempool.space',
+      source: 'MODELED',
+      fetchedAt: null,
+      stale: false,
+      error: 'Forge API is unavailable',
+    };
+  }
+}
+
 export async function fetchMiningSummary(
   signal?: AbortSignal,
 ): Promise<MiningSummaryResponse> {

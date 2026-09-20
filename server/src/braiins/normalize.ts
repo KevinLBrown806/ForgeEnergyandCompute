@@ -99,6 +99,10 @@ export function normalizeWorker(name: string, raw: BraiinsWorkerRaw): PoolWorker
     shares5m: toNumber(raw.shares_5m),
     shares60m: toNumber(raw.shares_60m),
     shares24h: toNumber(raw.shares_24h),
+    rejectedShares24h:
+      raw.rejected_shares_24h != null ? toNumber(raw.rejected_shares_24h) : null,
+    staleShares24h:
+      raw.stale_shares_24h != null ? toNumber(raw.stale_shares_24h) : null,
   };
 }
 

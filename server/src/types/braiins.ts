@@ -34,6 +34,8 @@ export interface BraiinsWorkerRaw {
   shares_5m?: number;
   shares_60m?: number;
   shares_24h?: number;
+  rejected_shares_24h?: number;
+  stale_shares_24h?: number;
 }
 
 export interface BraiinsWorkersResponse {

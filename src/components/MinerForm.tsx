@@ -129,11 +129,17 @@ export function MinerForm({
             set('status', event.target.value as MinerAsset['status'])
           }
         >
-          <option value="active">Online (active)</option>
-          <option value="maintenance">Repair</option>
+          <option value="online">Online</option>
+          <option value="active">Online (legacy)</option>
+          <option value="offline">Offline</option>
+          <option value="repair">Repair</option>
+          <option value="maintenance">Repair (legacy)</option>
           <option value="ordered">Ordered</option>
+          <option value="shipping">Shipping</option>
+          <option value="deploying">Deploying</option>
           <option value="spare">Spare</option>
           <option value="retired">Retired</option>
+          <option value="sold">Sold</option>
           <option value="decommissioned">Decommissioned</option>
         </select>
       </label>
@@ -199,7 +205,7 @@ export function MinerForm({
         />
       </label>
       <label>
-        Acquisition cost (USD)
+        Purchase price (USD)
         <input
           min={0}
           step={0.01}
@@ -207,6 +213,40 @@ export function MinerForm({
           value={form.acquisitionCostUsd ?? ''}
           onChange={(event) =>
             set('acquisitionCostUsd', nullableNumber(event.target.value))
+          }
+        />
+      </label>
+      <label>
+        Shipping cost (USD)
+        <input
+          min={0}
+          step={0.01}
+          type="number"
+          value={form.shippingCostUsd ?? ''}
+          onChange={(event) =>
+            set('shippingCostUsd', nullableNumber(event.target.value))
+          }
+        />
+      </label>
+      <label>
+        Deployment cost (USD)
+        <input
+          min={0}
+          step={0.01}
+          type="number"
+          value={form.deploymentCostUsd ?? ''}
+          onChange={(event) =>
+            set('deploymentCostUsd', nullableNumber(event.target.value))
+          }
+        />
+      </label>
+      <label>
+        Deployment date
+        <input
+          type="date"
+          value={form.deploymentDate ?? ''}
+          onChange={(event) =>
+            set('deploymentDate', event.target.value || null)
           }
         />
       </label>

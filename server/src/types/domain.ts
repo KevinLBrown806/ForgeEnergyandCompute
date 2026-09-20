@@ -12,6 +12,8 @@ export interface PoolWorker {
   shares5m: number;
   shares60m: number;
   shares24h: number;
+  rejectedShares24h?: number | null;
+  staleShares24h?: number | null;
 }
 
 export interface MiningReward {

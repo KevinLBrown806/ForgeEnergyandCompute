@@ -352,7 +352,8 @@ export function FleetRegistry(props: FleetRegistryProps) {
               {props.assets.length === 0 && (
                 <tr>
                   <td className="empty-state" colSpan={14}>
-                    No miners registered. Add a miner or enable demo mode.
+                    No Forge-owned miners registered. Add a miner in Data
+                    management or enable Demo mode to inspect placeholders.
                   </td>
                 </tr>
               )}
