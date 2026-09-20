@@ -129,7 +129,8 @@ apiRouter.get('/auth/session', (req, res) => {
     authenticated: isAuthenticated(req),
     authConfigured: env.authConfigured,
     braiinsConfigured: env.braiinsConfigured,
-    authRequired: env.braiinsConfigured,
+    // Owner ledger and Braiins telemetry both use the operator session.
+    authRequired: env.authConfigured,
   });
 });
 
