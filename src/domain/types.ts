@@ -305,7 +305,9 @@ export type TreasuryTransactionType =
   | 'HOSTING_PAYMENT'
   | 'ELECTRICITY_PAYMENT'
   | 'OTHER_EXPENSE'
-  | 'OTHER_INCOME';
+  | 'OTHER_INCOME'
+  | 'REVERSAL'
+  | 'ADJUSTMENT';
 
 export type TreasuryAsset = 'BTC' | 'USD';
 
@@ -325,6 +327,7 @@ export interface TreasuryTransaction {
   memo: string;
   source: 'manual' | 'live' | 'imported';
   externalReference: string | null;
+  productionRef?: string | null;
   createdAt: string;
 }
 
@@ -343,10 +346,13 @@ export interface Facility {
   deployedMW: number;
   electricityRate: number | null;
   hostingFee: number | null;
+  hostingStructure?: string | null;
+  term?: string | null;
   agreementStart: string | null;
   agreementEnd: string | null;
   status: FacilityStatus;
   notes: string;
+  active?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -365,9 +371,18 @@ export interface Liability {
   kind: LiabilityKind;
   label: string;
   amountUsd: number;
+  /** Original principal when known (v1.3). */
+  originalPrincipalUsd?: number | null;
+  /** Outstanding principal when known (v1.3). */
+  outstandingPrincipalUsd?: number | null;
+  ratePct?: number | null;
+  paymentUsd?: number | null;
+  maturity?: string | null;
+  securedAsset?: string | null;
   counterparty: string;
   notes: string;
   asOf: string;
+  active?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -397,6 +412,9 @@ export interface OwnerAssumptions {
   monthlyAccumulationBtc: number;
   targetBtc: number;
   otherAssetsUsd: number;
+  btcAllocationTargetPct?: number | null;
+  miningAllocationTargetPct?: number | null;
+  cashAllocationTargetPct?: number | null;
   updatedAt: string;
 }
 

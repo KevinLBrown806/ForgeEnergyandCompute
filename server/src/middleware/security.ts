@@ -9,7 +9,7 @@ export function applySecurity(app: Express): void {
   app.use(
     cors({
       origin: env.corsOrigins,
-      methods: ['GET', 'HEAD', 'POST', 'OPTIONS'],
+      methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
       allowedHeaders: ['Content-Type', 'Accept'],
       credentials: env.corsAllowCredentials,
       maxAge: 600,

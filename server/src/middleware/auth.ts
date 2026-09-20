@@ -145,3 +145,47 @@ export function requireTelemetryAuth(
 
   next();
 }
+
+/**
+ * Protect owner ledger routes.
+ * When operator auth is configured, require a valid session.
+ * When auth is not configured (local/dev without secrets), allow access so
+ * durable ops remain testable — production with secrets always gates.
+ * Never expose these routes anonymously when FORGE_OPERATOR_PASSWORD is set.
+ */
+export function requireOwnerAuth(
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): void {
+  const env = getEnv();
+  if (!env.authConfigured) {
+    if (env.isProduction) {
+      res.status(503).json({
+        ok: false,
+        error:
+          'Owner ledger requires FORGE_OPERATOR_PASSWORD and FORGE_SESSION_SECRET in production.',
+        code: 'auth_not_configured',
+      });
+      return;
+    }
+    (req as Request & { forgeAuthenticated?: boolean }).forgeAuthenticated =
+      false;
+    next();
+    return;
+  }
+
+  if (!isAuthenticated(req)) {
+    res.status(401).json({
+      ok: false,
+      error: 'Authentication required to access owner ledger.',
+      code: 'auth_required',
+      authRequired: true,
+      authConfigured: true,
+    });
+    return;
+  }
+
+  (req as Request & { forgeAuthenticated?: boolean }).forgeAuthenticated = true;
+  next();
+}

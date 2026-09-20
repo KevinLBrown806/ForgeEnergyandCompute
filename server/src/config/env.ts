@@ -18,6 +18,10 @@ export interface ForgeEnv {
   sessionTtlSeconds: number;
   cookieSecure: boolean;
   cookieSameSite: 'lax' | 'none';
+  /** SQLite path for durable owner ledger (`:memory:` for tests). */
+  databasePath: string;
+  /** Optional shared secret for cron/job triggers (in addition to owner auth). */
+  jobTriggerSecret: string | undefined;
 }
 
 function parsePositiveInt(
@@ -131,6 +135,13 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ForgeEnv {
   // SameSite=None requires Secure; production always uses Secure.
   const cookieSecure = isProduction || cookieSameSite === 'none';
 
+  const databasePath =
+    env.FORGE_DATABASE_PATH?.trim() ||
+    (nodeEnv === 'test' || env.FORGE_DB_MEMORY === '1'
+      ? ':memory:'
+      : `${process.cwd()}/data/forge.db`);
+  const jobTriggerSecret = env.FORGE_JOB_TRIGGER_SECRET?.trim() || undefined;
+
   const result: ForgeEnv = {
     port,
     nodeEnv,
@@ -148,6 +159,8 @@ export function loadEnv(env: NodeJS.ProcessEnv = process.env): ForgeEnv {
     sessionTtlSeconds,
     cookieSecure,
     cookieSameSite,
+    databasePath,
+    jobTriggerSecret,
   };
   cached = result;
   return result;

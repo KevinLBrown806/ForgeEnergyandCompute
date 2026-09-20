@@ -12,14 +12,29 @@ import { OperatorLogin } from './components/OperatorLogin';
 import { StatCard } from './components/StatCard';
 import { WorkersPanel } from './components/WorkersPanel';
 import {
-  createLocalDemoModeStore,
-  createLocalFacilityRepository,
-  createLocalFleetRepository,
-  createLocalLiabilityRepository,
-  createLocalOwnerSettingsRepository,
-  createLocalTreasuryLedgerRepository,
-  createLocalTreasuryRepository,
-} from './adapters/localStorage';
+  createApiDemoModeStore,
+  createApiFacilityRepository,
+  createApiFleetRepository,
+  createApiLiabilityRepository,
+  createApiOwnerSettingsRepository,
+  createApiTreasuryLedgerRepository,
+  createApiTreasuryRepository,
+  fetchBraiinsConnectionStatus,
+  fetchOwnerExport,
+  fetchReconciliation,
+  migrateLegacyLocalStorage,
+  previewMinerImport,
+  commitMinerImport,
+  importAccountingCsv,
+  fetchMigrationStatus,
+  reportBraiinsSyncState,
+  type ReconciliationIssueDto,
+} from './adapters/forgeApiRepos';
+import {
+  detectLegacyLocalStorageLedger,
+  downloadLegacyBackup,
+} from './adapters/legacyMigration';
+import { createLocalDemoModeStore } from './adapters/localStorage';
 import {
   energy,
   flywheel,
@@ -103,13 +118,15 @@ import {
 import { modeledNetworkSnapshot } from './data/providers/networkProvider';
 import { DAYS_PER_MONTH } from './lib/estimator';
 
-const fleetRepository = createLocalFleetRepository();
-const treasuryRepository = createLocalTreasuryRepository();
-const ledgerRepository = createLocalTreasuryLedgerRepository();
-const facilityRepository = createLocalFacilityRepository();
-const liabilityRepository = createLocalLiabilityRepository();
-const settingsRepository = createLocalOwnerSettingsRepository();
-const demoModeStore = createLocalDemoModeStore();
+const fleetRepository = createApiFleetRepository();
+const treasuryRepository = createApiTreasuryRepository();
+const ledgerRepository = createApiTreasuryLedgerRepository();
+const facilityRepository = createApiFacilityRepository();
+const liabilityRepository = createApiLiabilityRepository();
+const settingsRepository = createApiOwnerSettingsRepository();
+const demoModeStore = createApiDemoModeStore();
+/** UI-only fallback for demo toggle if owner API is unreachable before login. */
+const localDemoFallback = createLocalDemoModeStore();
 const marketProvider = createForgeMarketProvider();
 const networkProvider = createForgeNetworkProvider();
 const accountingProvider = createStubAccountingProvider();
@@ -189,6 +206,23 @@ function App() {
   const [poolLoading, setPoolLoading] = useState(true);
   const [authSession, setAuthSession] = useState<AuthSession>(EMPTY_AUTH);
   const [btcPerThDay, setBtcPerThDay] = useState(0);
+  const [reconciliationIssues, setReconciliationIssues] = useState<
+    ReconciliationIssueDto[]
+  >([]);
+  const [braiinsConnection, setBraiinsConnection] = useState<{
+    configured: boolean;
+    authenticated: boolean | null;
+    lastSuccessfulSync: string | null;
+    workerCount: number | null;
+    matchedWorkers: number | null;
+    unmatchedWorkers: number | null;
+    staleWorkers: number | null;
+    lastError: string | null;
+  } | null>(null);
+  const [legacyInfo, setLegacyInfo] = useState(() =>
+    detectLegacyLocalStorageLedger(),
+  );
+  const [migrationStatus, setMigrationStatus] = useState<string | null>(null);
 
   const reloadFleet = useCallback(async () => {
     setStoredAssets(await fleetRepository.list());
@@ -231,9 +265,9 @@ function App() {
   const handleLogin = useCallback(async (password: string) => {
     const result = await loginOperator(password);
     if (!result.ok) return result.error ?? 'Login failed';
-    await reloadPool();
+    await Promise.all([reloadPool(), reloadOwnerLedger().catch(() => undefined)]);
     return null;
-  }, [reloadPool]);
+  }, [reloadPool, reloadOwnerLedger]);
 
   const handleLogout = useCallback(async () => {
     await logoutOperator();
@@ -245,14 +279,16 @@ function App() {
   useEffect(() => {
     const controller = new AbortController();
     void Promise.all([
-      fleetRepository.list(),
-      treasuryRepository.get(),
-      ledgerRepository.list(),
-      facilityRepository.list(),
-      liabilityRepository.list(),
-      settingsRepository.getAssumptions(),
-      settingsRepository.getAllocationTargets(),
-      demoModeStore.isDemoMode(),
+      fleetRepository.list().catch(() => [] as MinerAsset[]),
+      treasuryRepository.get().catch(() => DEFAULT_TREASURY),
+      ledgerRepository.list().catch(() => [] as TreasuryTransaction[]),
+      facilityRepository.list().catch(() => [] as Facility[]),
+      liabilityRepository.list().catch(() => [] as Liability[]),
+      settingsRepository.getAssumptions().catch(() => DEFAULT_ASSUMPTIONS),
+      settingsRepository
+        .getAllocationTargets()
+        .catch(() => DEFAULT_ALLOCATION_TARGETS),
+      demoModeStore.isDemoMode().catch(() => localDemoFallback.isDemoMode()),
       marketProvider.getQuote(),
       networkProvider.getSnapshot(),
       accountingProvider.getSnapshot(),
@@ -386,6 +422,21 @@ function App() {
     () => matchFleetWorkers(assets, pool.workers),
     [assets, pool.workers],
   );
+
+  useEffect(() => {
+    if (!pool.configured) return;
+    const unmatched = matchReport.unmatchedBraiinsWorkers.length;
+    const matched = matchReport.matchedWorkers;
+    void reportBraiinsSyncState({
+      lastSuccessAt: pool.ok ? (pool.fetchedAt ?? new Date().toISOString()) : null,
+      lastError: pool.error,
+      workerCount: pool.workers.length,
+      matchedWorkers: matched,
+      unmatchedWorkers: unmatched,
+      staleWorkers: pool.stale ? pool.workers.length : 0,
+    }).catch(() => undefined);
+  }, [matchReport, pool]);
+
   const ledgerTotals = useMemo(
     () => aggregateTreasuryLedger(transactions),
     [transactions],
@@ -582,9 +633,70 @@ function App() {
     await ledgerRepository.append(input);
     await reloadOwnerLedger();
   };
-  const removeTx = async (id: string) => {
-    await ledgerRepository.remove(id);
+  const removeTx = async (_id: string) => {
+    throw new Error(
+      'Treasury ledger is append-only. Record a REVERSAL or ADJUSTMENT transaction instead of deleting history.',
+    );
+  };
+
+  const refreshReconciliation = async () => {
+    const issues = await fetchReconciliation(
+      pool.workers.map((w) => ({ name: w.name })),
+    );
+    setReconciliationIssues(issues);
+    try {
+      const conn = await fetchBraiinsConnectionStatus();
+      setBraiinsConnection(conn.braiins);
+    } catch {
+      /* optional */
+    }
+  };
+
+  const exportBackup = async () => {
+    const backup = await fetchOwnerExport();
+    downloadLegacyBackup(backup, `forge-owner-backup-${Date.now()}.json`);
+  };
+
+  const migrateLegacy = async () => {
+    const detected = detectLegacyLocalStorageLedger();
+    downloadLegacyBackup(
+      detected.payload,
+      `forge-legacy-browser-backup-${Date.now()}.json`,
+    );
+    await migrateLegacyLocalStorage(detected.payload, false);
+    const status = await fetchMigrationStatus();
+    setMigrationStatus(status.status);
+    setLegacyInfo(detectLegacyLocalStorageLedger());
     await reloadOwnerLedger();
+  };
+
+  const downloadLegacy = () => {
+    const detected = detectLegacyLocalStorageLedger();
+    downloadLegacyBackup(
+      detected.payload,
+      `forge-legacy-browser-backup-${Date.now()}.json`,
+    );
+  };
+
+  const previewMinerCsv = async (csv: string) => {
+    const result = await previewMinerImport(csv);
+    return {
+      inserts: result.inserts,
+      updates: result.updates,
+      rejected: result.rejected,
+      summary: `Preview: ${result.inserts} insert · ${result.updates} update · ${result.rejected} rejected`,
+    };
+  };
+
+  const commitMinerCsv = async (csv: string) => {
+    const result = await commitMinerImport(csv);
+    await reloadOwnerLedger();
+    return `Committed: ${result.inserted} inserted · ${result.updated} updated · ${result.rejected} rejected`;
+  };
+
+  const importAccounting = async (csv: string) => {
+    const result = await importAccountingCsv(csv);
+    return `${result.accountingProvider} · imported ${result.rowCount} rows as ${result.provenance}`;
   };
   const createFacility = async (input: FacilityInput) => {
     await facilityRepository.create(input);
@@ -620,7 +732,7 @@ function App() {
       <main>
         <section className="lede-row">
           <div>
-            <p className="eyebrow">Forge OS v1.2 · Live data + owner ledger</p>
+            <p className="eyebrow">Forge OS v1.3 · Durable operations</p>
             <h1>Energy → Compute → Bitcoin → Treasury → Infrastructure</h1>
           </div>
           <p className="lede-row__note">
@@ -1464,6 +1576,15 @@ function App() {
             assumptions={assumptions}
             allocationTargets={allocationTargets}
             treasury={treasury}
+            reconciliationIssues={reconciliationIssues}
+            braiinsConnection={braiinsConnection}
+            legacyMigration={{
+              present: legacyInfo.present,
+              minerCount: legacyInfo.minerCount,
+              facilityCount: legacyInfo.facilityCount,
+              transactionCount: legacyInfo.transactionCount,
+              status: migrationStatus,
+            }}
             onCreateAsset={createAsset}
             onUpdateAsset={updateAsset}
             onRemoveAsset={removeAsset}
@@ -1477,6 +1598,13 @@ function App() {
             onSaveAssumptions={saveAssumptions}
             onSaveAllocation={saveAllocation}
             onSaveTreasury={saveTreasury}
+            onRefreshReconciliation={refreshReconciliation}
+            onExportBackup={exportBackup}
+            onMigrateLegacy={migrateLegacy}
+            onDownloadLegacyBackup={downloadLegacy}
+            onPreviewMinerCsv={previewMinerCsv}
+            onCommitMinerCsv={commitMinerCsv}
+            onImportAccountingCsv={importAccounting}
           />
         </Section>
       </main>
@@ -1484,7 +1612,7 @@ function App() {
       <footer className="footer">
         <span>© {new Date().getFullYear()} Forge Energy &amp; Compute</span>
         <span className="footer__note">
-          v1.2 live data + owner ledger · LIVE / MANUAL / MODELED / DERIVED
+          v1.3 durable operations · LIVE / MANUAL / MODELED / DERIVED
         </span>
       </footer>
     </div>

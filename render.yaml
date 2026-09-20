@@ -8,6 +8,13 @@ services:
     startCommand: npm start
     healthCheckPath: /api/health
     autoDeployTrigger: checksPass
+    # Persistent disk keeps the SQLite owner ledger across deploys/restarts.
+    # Free web services do not support disks — upgrade the instance or set
+    # FORGE_DATABASE_PATH on an attached disk (see docs/durable-operations.md).
+    # disk:
+    #   name: forge-data
+    #   mountPath: /var/data
+    #   sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -19,6 +26,10 @@ services:
         sync: false
       - key: FORGE_SESSION_SECRET
         sync: false
+      - key: FORGE_JOB_TRIGGER_SECRET
+        sync: false
+      - key: FORGE_DATABASE_PATH
+        value: "/var/data/forge.db"
       - key: FORGE_COOKIE_SAMESITE
         value: "lax"
       - key: RATE_LIMIT_PER_MINUTE
@@ -27,3 +38,19 @@ services:
         value: "12000"
       - key: BRAIINS_REQUEST_INTERVAL_MS
         value: "5000"
+
+  # Optional: schedule market/network snapshots.
+  # Uncomment when the web service is on a paid plan that supports cron jobs,
+  # or invoke externally: curl -X POST -H "Authorization: Bearer $FORGE_JOB_TRIGGER_SECRET" \
+  #   https://forge-api.onrender.com/api/jobs/snapshots?kind=all
+  # - type: cron
+  #   name: forge-market-snapshots
+  #   runtime: node
+  #   plan: starter
+  #   rootDir: server
+  #   schedule: "*/15 * * * *"
+  #   buildCommand: npm ci && npm run build
+  #   startCommand: node dist/jobs/runSnapshotsCli.js --kind=market
+  #   envVars:
+  #     - key: FORGE_DATABASE_PATH
+  #       value: "/var/data/forge.db"
