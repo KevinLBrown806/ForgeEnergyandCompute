@@ -14,8 +14,8 @@ import type {
 
 /**
  * Persistence abstraction for fleet inventory.
- * localStorage implementation. Swap for a server repository later
- * without rewriting UI components.
+ * Durable implementation: Forge API + SQLite (`forgeApiRepos`).
+ * Legacy localStorage adapters remain for migration only.
  */
 export interface FleetRepository {
   list(): Promise<MinerAsset[]>;

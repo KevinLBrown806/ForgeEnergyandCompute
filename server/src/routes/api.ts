@@ -9,6 +9,8 @@ import {
   getBraiinsToken,
 } from '../braiins/client.js';
 import { getEnv } from '../config/env.js';
+import { getDb } from '../db/client.js';
+import { runSnapshotJob } from '../jobs/snapshots.js';
 import {
   clearSessionCookie,
   isAuthenticated,
@@ -21,16 +23,58 @@ import {
   fetchLiveMarketQuote,
   fetchLiveNetworkSnapshot,
 } from '../services/market.js';
+import { ownerRouter } from './owner.js';
 
 export const apiRouter = Router();
+
+apiRouter.use('/owner', ownerRouter);
+
+/**
+ * Cron / platform scheduler entrypoint.
+ * Prefer authenticated owner job route; this path accepts either a valid
+ * operator session or `Authorization: Bearer $FORGE_JOB_TRIGGER_SECRET`.
+ */
+apiRouter.post('/jobs/snapshots', async (req, res) => {
+  const env = getEnv();
+  const authHeader = req.headers.authorization ?? '';
+  const bearer = authHeader.startsWith('Bearer ')
+    ? authHeader.slice(7).trim()
+    : '';
+  const secretOk =
+    Boolean(env.jobTriggerSecret) && bearer === env.jobTriggerSecret;
+  const sessionOk = env.authConfigured ? isAuthenticated(req) : !env.isProduction;
+  if (!secretOk && !sessionOk) {
+    res.status(401).json({
+      ok: false,
+      error: 'Authentication required for snapshot jobs',
+      code: 'auth_required',
+    });
+    return;
+  }
+  const kind =
+    (typeof req.query.kind === 'string' ? req.query.kind : req.body?.kind) ??
+    'all';
+  if (kind !== 'market' && kind !== 'network' && kind !== 'all') {
+    res.status(400).json({ ok: false, error: 'kind must be market|network|all' });
+    return;
+  }
+  try {
+    const result = await runSnapshotJob(getDb(), kind);
+    res.json({ ok: true, result });
+  } catch (err) {
+    res.status(502).json({ ok: false, error: safeErrorMessage(err) });
+  }
+});
 
 apiRouter.get('/health', (_req, res) => {
   const env = getEnv();
   res.json({
     ok: true,
     service: 'forge-api',
+    version: '1.3',
     configured: env.braiinsConfigured,
     authConfigured: env.authConfigured,
+    durableStore: true,
     timestamp: new Date().toISOString(),
   });
 });
@@ -85,7 +129,8 @@ apiRouter.get('/auth/session', (req, res) => {
     authenticated: isAuthenticated(req),
     authConfigured: env.authConfigured,
     braiinsConfigured: env.braiinsConfigured,
-    authRequired: env.braiinsConfigured,
+    // Owner ledger and Braiins telemetry both use the operator session.
+    authRequired: env.authConfigured,
   });
 });
 

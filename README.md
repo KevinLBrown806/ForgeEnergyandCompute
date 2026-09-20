@@ -4,8 +4,8 @@ Forge OS is a mining operations dashboard for the strategy:
 
 **Energy → Compute → Bitcoin → Treasury → Infrastructure**
 
-The React frontend maintains a local fleet registry, combines registered
-inventory with Braiins Pool telemetry from the Forge API, and keeps the mining
+The React frontend reads the durable owner ledger from Forge API, combines
+Forge-owned inventory with Braiins Pool telemetry, and keeps the mining
 calculator explicitly separated as a modeled/scenario tool.
 
 ## Data provenance
@@ -25,17 +25,21 @@ Every primary KPI is tagged:
 - `src/domain/` — canonical fleet, worker, reward, payout, alert, and treasury DTOs plus pure matching/health/aggregation logic
 - `src/domain/dataSource.ts` — `LIVE` / `MANUAL` / `MODELED` / `DERIVED` provenance types
 - `src/data/providers/` — swap-ready market, network, mining-pool, and Found accounting adapters
-- `src/adapters/localStorage.ts` — owner ledger persistence behind repository interfaces
-- `src/services/forgeApi.ts` — the only frontend path to Forge API (Braiins, market, network)
+- `src/adapters/forgeApiRepos.ts` — durable owner ledger via authenticated Forge API
+- `src/adapters/localStorage.ts` — legacy browser adapters (migration source only)
+- `src/adapters/legacyMigration.ts` — detect/import v1.2 localStorage into durable store
+- `src/services/forgeApi.ts` — the only frontend path to Forge API (Braiins, market, network, owner)
 - `src/lib/mining.ts` — pure mining economics engine
 - `src/lib/unitEconomics.ts` — per-miner unit economics and breakevens
 - `src/lib/treasuryLedger.ts` — append-only treasury transaction aggregation
-- `src/lib/nav.ts` — NAV from assets and liabilities
+- `src/lib/nav.ts` — NAV + historical holdings helpers
 - `src/lib/treasury.ts` — treasury valuation helper (manual position overlay)
-- `server/` — Node/TypeScript Forge API (Braiins token stays server-side)
+- `server/` — Node/TypeScript Forge API (Braiins token + SQLite owner ledger stay server-side)
+- `docs/durable-operations.md` — v1.3 persistence, jobs, migration, onboarding
 
 The default fleet and treasury are empty. Demo mode is opt-in and clearly
-labeled; demo assets are not written to the operating registry.
+labeled; demo assets are not written to the operating registry and never
+enter owner KPIs.
 
 ## Editing operating data
 
@@ -95,11 +99,12 @@ Routes:
 - `GET /api/health`
 - `GET /api/market/snapshot` — public BTC/USD (CoinGecko proxy, no auth)
 - `GET /api/network/snapshot` — public Bitcoin network (mempool.space proxy, no auth)
-- `GET /api/mining/summary`
-- `GET /api/braiins/stats`
-- `GET /api/braiins/workers`
-- `GET /api/braiins/rewards?from=YYYY-MM-DD&to=YYYY-MM-DD`
-- `GET /api/braiins/payouts?from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET /api/auth/session|login|logout`
+- `GET /api/mining/summary`, `/api/braiins/*` — Braiins telemetry (auth when token set)
+- `GET|POST|PUT|DELETE /api/owner/*` — durable owner ledger (auth when configured)
+- `POST /api/jobs/snapshots` — market/network history capture (session or job secret)
+
+See `docs/durable-operations.md` for the full owner API surface.
 
 Runtime variables:
 
@@ -110,6 +115,8 @@ Runtime variables:
 | `FORGE_OPERATOR_PASSWORD` | Operator login password (server-only) |
 | `FORGE_SESSION_SECRET` | HMAC secret for HttpOnly session cookies |
 | `FORGE_COOKIE_SAMESITE` | `lax` (default, Netlify same-origin proxy) or `none` (direct cross-origin testing) |
+| `FORGE_DATABASE_PATH` | SQLite path for durable owner ledger |
+| `FORGE_JOB_TRIGGER_SECRET` | Optional bearer for cron snapshot jobs |
 | `PORT` | API listen port (Render supplies this) |
 | `RATE_LIMIT_PER_MINUTE` | Forge API per-client request limit |
 | `BRAIINS_TIMEOUT_MS` | Optional upstream timeout override |
@@ -224,5 +231,6 @@ falls back to the SPA.
 | `npm run server:test` | Run Forge API tests |
 | `npm run server:build` | Build Forge API to `server/dist/` |
 
-Fleet inventory and treasury values are currently browser-local. Clearing site
-storage removes them, and they do not synchronize across operators or devices.
+Owner fleet, treasury, facilities, and liabilities persist in the Forge API
+SQLite ledger (`FORGE_DATABASE_PATH`). See `docs/durable-operations.md` for
+migration from browser localStorage, snapshot jobs, and onboarding.

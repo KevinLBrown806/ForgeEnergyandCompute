@@ -24,7 +24,11 @@ type Tab =
   | 'treasury'
   | 'liabilities'
   | 'assumptions'
-  | 'allocation';
+  | 'allocation'
+  | 'imports'
+  | 'reconciliation'
+  | 'connections'
+  | 'backup';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'fleet', label: 'Fleet' },
@@ -33,6 +37,10 @@ const TABS: { id: Tab; label: string }[] = [
   { id: 'liabilities', label: 'Liabilities' },
   { id: 'assumptions', label: 'Assumptions' },
   { id: 'allocation', label: 'Allocation targets' },
+  { id: 'imports', label: 'Imports' },
+  { id: 'reconciliation', label: 'Reconciliation' },
+  { id: 'connections', label: 'Connections' },
+  { id: 'backup', label: 'Backup / Export' },
 ];
 
 const TX_TYPES: TreasuryTransactionType[] = [
@@ -48,6 +56,8 @@ const TX_TYPES: TreasuryTransactionType[] = [
   'ELECTRICITY_PAYMENT',
   'OTHER_EXPENSE',
   'OTHER_INCOME',
+  'REVERSAL',
+  'ADJUSTMENT',
 ];
 
 function emptyTx(): TreasuryTransactionInput {
@@ -107,6 +117,30 @@ export function DataManagement(props: {
   assumptions: OwnerAssumptions;
   allocationTargets: CapitalAllocationTarget[];
   treasury: TreasuryPosition;
+  reconciliationIssues?: Array<{
+    id: string;
+    severity: string;
+    title: string;
+    detail: string;
+    code: string;
+  }>;
+  braiinsConnection?: {
+    configured: boolean;
+    authenticated: boolean | null;
+    lastSuccessfulSync: string | null;
+    workerCount: number | null;
+    matchedWorkers: number | null;
+    unmatchedWorkers: number | null;
+    staleWorkers: number | null;
+    lastError: string | null;
+  } | null;
+  legacyMigration?: {
+    present: boolean;
+    minerCount: number;
+    facilityCount: number;
+    transactionCount: number;
+    status: string | null;
+  } | null;
   onCreateAsset: (input: MinerAssetInput) => Promise<void>;
   onUpdateAsset: (id: string, input: MinerAssetInput) => Promise<void>;
   onRemoveAsset: (id: string) => Promise<void>;
@@ -120,6 +154,18 @@ export function DataManagement(props: {
   onSaveAssumptions: (next: OwnerAssumptions) => Promise<void>;
   onSaveAllocation: (targets: CapitalAllocationTarget[]) => Promise<void>;
   onSaveTreasury: (position: TreasuryPosition) => Promise<void>;
+  onRefreshReconciliation?: () => Promise<void>;
+  onExportBackup?: () => Promise<void>;
+  onMigrateLegacy?: () => Promise<void>;
+  onDownloadLegacyBackup?: () => void;
+  onPreviewMinerCsv?: (csv: string) => Promise<{
+    inserts: number;
+    updates: number;
+    rejected: number;
+    summary: string;
+  }>;
+  onCommitMinerCsv?: (csv: string) => Promise<string>;
+  onImportAccountingCsv?: (csv: string) => Promise<string>;
 }) {
   const [tab, setTab] = useState<Tab>('fleet');
   const [editing, setEditing] = useState<MinerAsset | 'new' | null>(null);
@@ -129,6 +175,8 @@ export function DataManagement(props: {
   const [assumptions, setAssumptions] = useState(props.assumptions);
   const [targets, setTargets] = useState(props.allocationTargets);
   const [error, setError] = useState<string | null>(null);
+  const [importCsv, setImportCsv] = useState('');
+  const [importMessage, setImportMessage] = useState<string | null>(null);
 
   const saveAsset = async (input: MinerAssetInput) => {
     if (editing === 'new') await props.onCreateAsset(input);
@@ -175,7 +223,7 @@ export function DataManagement(props: {
         <div>
           <h3>Data management</h3>
           <p className="panel__meta">
-            Owner records · MANUAL · stored in this browser · not the executive view
+            Owner records · MANUAL · durable Forge ledger · not the executive view
           </p>
         </div>
       </div>
@@ -820,6 +868,221 @@ export function DataManagement(props: {
             </button>
           </div>
         </form>
+      )}
+
+      {tab === 'imports' && (
+        <div className="panel">
+          <h4>Bulk miner CSV import</h4>
+          <p className="panel__meta">
+            Parse → validate → preview → confirm. Demo inventory never becomes
+            owner inventory through this path.
+          </p>
+          <p>
+            <a href="/api/owner/import/templates/miners.csv">
+              Download miner CSV template
+            </a>
+            {' · '}
+            <a href="/api/owner/import/templates/facilities.csv">
+              Facility template
+            </a>
+            {' · '}
+            <a href="/api/owner/import/templates/accounting.csv">
+              Accounting template
+            </a>
+          </p>
+          <textarea
+            rows={8}
+            value={importCsv}
+            onChange={(e) => setImportCsv(e.target.value)}
+            placeholder="Paste CSV contents here"
+          />
+          <div className="form-actions">
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setError(null);
+                setImportMessage(null);
+                void props.onPreviewMinerCsv?.(importCsv).then(
+                  (r) =>
+                    setImportMessage(
+                      r.summary ??
+                        `Preview: ${r.inserts} insert, ${r.updates} update, ${r.rejected} rejected`,
+                    ),
+                  (err) =>
+                    setError(err instanceof Error ? err.message : 'Preview failed'),
+                );
+              }}
+            >
+              Preview miners
+            </button>
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => {
+                setError(null);
+                setImportMessage(null);
+                void props.onCommitMinerCsv?.(importCsv).then(
+                  (msg) => setImportMessage(msg),
+                  (err) =>
+                    setError(err instanceof Error ? err.message : 'Commit failed'),
+                );
+              }}
+            >
+              Confirm commit
+            </button>
+            <button
+              className="button"
+              type="button"
+              onClick={() => {
+                setError(null);
+                setImportMessage(null);
+                void props.onImportAccountingCsv?.(importCsv).then(
+                  (msg) => setImportMessage(msg),
+                  (err) =>
+                    setError(err instanceof Error ? err.message : 'Import failed'),
+                );
+              }}
+            >
+              Import accounting CSV
+            </button>
+          </div>
+          {importMessage && <p className="notice">{importMessage}</p>}
+          <p className="panel__meta">
+            Accounting imports are MANUAL / IMPORTED provenance — never LIVE.
+            Found Accounting remains NOT CONNECTED.
+          </p>
+        </div>
+      )}
+
+      {tab === 'reconciliation' && (
+        <div className="panel">
+          <div className="form-actions">
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => void props.onRefreshReconciliation?.()}
+            >
+              Run reconciliation
+            </button>
+          </div>
+          <ul className="admin-list">
+            {(props.reconciliationIssues ?? []).length === 0 && (
+              <li>
+                <span>No issues reported. Run reconciliation to refresh.</span>
+              </li>
+            )}
+            {(props.reconciliationIssues ?? []).map((issue) => (
+              <li key={issue.id}>
+                <span>
+                  <strong>{issue.severity}</strong> · {issue.code} — {issue.title}
+                  <br />
+                  <span className="panel__meta">{issue.detail}</span>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {tab === 'connections' && (
+        <div className="panel">
+          <h4>Braiins Pool</h4>
+          <ul className="admin-list">
+            <li>
+              <span>
+                Configured:{' '}
+                {props.braiinsConnection?.configured ? 'yes' : 'no'}
+              </span>
+            </li>
+            <li>
+              <span>
+                Authenticated:{' '}
+                {props.braiinsConnection?.authenticated == null
+                  ? 'n/a'
+                  : props.braiinsConnection.authenticated
+                    ? 'yes'
+                    : 'failed / required'}
+              </span>
+            </li>
+            <li>
+              <span>
+                Last successful sync:{' '}
+                {props.braiinsConnection?.lastSuccessfulSync ?? '—'}
+              </span>
+            </li>
+            <li>
+              <span>
+                Workers: {props.braiinsConnection?.workerCount ?? '—'} · matched{' '}
+                {props.braiinsConnection?.matchedWorkers ?? '—'} · unmatched{' '}
+                {props.braiinsConnection?.unmatchedWorkers ?? '—'} · stale{' '}
+                {props.braiinsConnection?.staleWorkers ?? '—'}
+              </span>
+            </li>
+            {props.braiinsConnection?.lastError && (
+              <li>
+                <span>Provider error: {props.braiinsConnection.lastError}</span>
+              </li>
+            )}
+          </ul>
+          <h4>Found Accounting</h4>
+          <p>
+            <strong>Found Accounting — NOT CONNECTED</strong>
+          </p>
+          <p className="panel__meta">
+            No API scrape. Use Imports → accounting CSV (MANUAL / IMPORTED).
+          </p>
+        </div>
+      )}
+
+      {tab === 'backup' && (
+        <div className="panel">
+          <h4>Durable ledger backup</h4>
+          <p className="panel__meta">
+            JSON backup of miners, facilities, treasury, liabilities, settings.
+            Portable for disaster recovery.
+          </p>
+          <div className="form-actions">
+            <button
+              className="button button--primary"
+              type="button"
+              onClick={() => void props.onExportBackup?.()}
+            >
+              Export JSON backup
+            </button>
+            <a className="button" href="/api/owner/export/miners.csv">
+              Export miners CSV
+            </a>
+          </div>
+          {props.legacyMigration?.present && (
+            <>
+              <h4>Legacy browser ledger migration</h4>
+              <p className="panel__meta">
+                Detected localStorage data: {props.legacyMigration.minerCount}{' '}
+                miners, {props.legacyMigration.facilityCount} facilities,{' '}
+                {props.legacyMigration.transactionCount} txs. Server status:{' '}
+                {props.legacyMigration.status ?? 'unknown'}. Explicit import
+                only — never silent overwrite.
+              </p>
+              <div className="form-actions">
+                <button
+                  className="button"
+                  type="button"
+                  onClick={() => props.onDownloadLegacyBackup?.()}
+                >
+                  Download browser backup
+                </button>
+                <button
+                  className="button button--primary"
+                  type="button"
+                  onClick={() => void props.onMigrateLegacy?.()}
+                >
+                  Import into durable ledger
+                </button>
+              </div>
+            </>
+          )}
+        </div>
       )}
     </div>
   );
