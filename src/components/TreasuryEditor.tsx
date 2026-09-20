@@ -1,6 +1,22 @@
 import { useState, type FormEvent } from 'react';
 import type { TreasuryPosition } from '../domain/types';
 
+type NumberKey = keyof Pick<
+  TreasuryPosition,
+  | 'btcHoldings'
+  | 'avgAcquisitionPriceUsd'
+  | 'btcMined'
+  | 'btcPurchased'
+  | 'btcSold'
+  | 'btcTransferred'
+  | 'cashReserveUsd'
+  | 'minerHardwareBookValueUsd'
+  | 'otherAssetsUsd'
+  | 'liabilitiesUsd'
+  | 'monthlyAccumulationBtc'
+  | 'targetBtc'
+>;
+
 export function TreasuryEditor({
   position,
   onSave,
@@ -21,17 +37,7 @@ export function TreasuryEditor({
     }
   };
 
-  const numberField = (
-    key: keyof Pick<
-      TreasuryPosition,
-      | 'btcHoldings'
-      | 'avgAcquisitionPriceUsd'
-      | 'monthlyAccumulationBtc'
-      | 'targetBtc'
-    >,
-    label: string,
-    step: string,
-  ) => (
+  const numberField = (key: NumberKey, label: string, step: string) => (
     <label>
       {label}
       <input
@@ -55,25 +61,41 @@ export function TreasuryEditor({
         <div>
           <h3>Manual treasury position</h3>
           <span className="panel__meta">
-            Operator-entered · saved only in this browser
+            Operator-entered · MANUAL · saved only in this browser
           </span>
         </div>
-        <span className="badge badge--manual">Manual</span>
+        <span className="badge badge--manual">MANUAL</span>
       </div>
       <div className="treasury-editor__fields">
-        {numberField('btcHoldings', 'BTC holdings', '0.00000001')}
+        {numberField('btcHoldings', 'BTC held', '0.00000001')}
+        {numberField('btcMined', 'BTC mined (tracked)', '0.00000001')}
+        {numberField('btcPurchased', 'BTC purchased', '0.00000001')}
+        {numberField('btcSold', 'BTC sold', '0.00000001')}
+        {numberField('btcTransferred', 'BTC transferred (net in)', '0.00000001')}
         {numberField(
           'avgAcquisitionPriceUsd',
-          'Average acquisition price (USD)',
+          'Average cost basis ($/BTC)',
           '0.01',
         )}
+        {numberField('cashReserveUsd', 'Cash reserve (USD)', '0.01')}
+        {numberField(
+          'minerHardwareBookValueUsd',
+          'Miner hardware book value (USD)',
+          '0.01',
+        )}
+        {numberField('otherAssetsUsd', 'Other assets (USD)', '0.01')}
+        {numberField('liabilitiesUsd', 'Liabilities (USD)', '0.01')}
         {numberField(
           'monthlyAccumulationBtc',
-          'Monthly accumulation (BTC)',
+          'Monthly accumulation plan (BTC)',
           '0.00000001',
         )}
         {numberField('targetBtc', 'Target (BTC)', '0.00000001')}
       </div>
+      <p className="field-hint">
+        Treasury cost basis is independent of mining production calculations.
+        Leave zeros until real Forge figures are available.
+      </p>
       <button className="button button--primary" disabled={saving} type="submit">
         {saving ? 'Saving…' : 'Save Treasury'}
       </button>

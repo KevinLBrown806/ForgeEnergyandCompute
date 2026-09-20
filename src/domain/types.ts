@@ -3,7 +3,30 @@
  * External Braiins/vendor response shapes stay in adapters/server.
  */
 
-export type MinerAssetStatus = 'active' | 'maintenance' | 'spare' | 'retired';
+/**
+ * Inventory / ledger status for a registered miner asset.
+ * Distinct from live pool health (`MinerHealthState`).
+ *
+ * ORDERED / DECOMMISSIONED never contribute to active production.
+ * REPAIR maps to maintenance; ONLINE production requires active + enabled.
+ */
+export type MinerAssetStatus =
+  | 'active'
+  | 'maintenance'
+  | 'spare'
+  | 'retired'
+  | 'ordered'
+  | 'decommissioned';
+
+/** Operational display labels for ledger status (owner-facing). */
+export const MINER_ASSET_STATUS_LABEL: Record<MinerAssetStatus, string> = {
+  active: 'ONLINE',
+  maintenance: 'REPAIR',
+  spare: 'SPARE',
+  retired: 'DECOMMISSIONED',
+  ordered: 'ORDERED',
+  decommissioned: 'DECOMMISSIONED',
+};
 
 export type MinerHealthState =
   | 'ONLINE'
@@ -28,14 +51,26 @@ export type AlertKind =
 
 export interface MinerAsset {
   id: string;
+  /** Manufacturer, e. and Bitmain / MicroBT. */
+  manufacturer: string;
   model: string;
+  /** Primary serial (required for registry UX). */
   serialNumber: string;
+  /** Optional additional serials for multi-unit groups. */
+  serialNumbers?: string[];
   quantity: number;
   /** Nominal hashrate per unit, TH/s. */
   nominalHashrateTh: number;
   /** Power draw per unit, watts. */
   wattage: number;
+  /**
+   * Efficiency J/TH when known from datasheet.
+   * If null, derived as wattage / nominalHashrateTh.
+   */
+  efficiencyJTh: number | null;
+  /** Purchase / acquisition date (ISO date). */
   acquisitionDate: string | null;
+  /** Purchase price per unit or lot, USD. */
   acquisitionCostUsd: number | null;
   hostingProvider: string;
   facility: string;
@@ -171,9 +206,34 @@ export interface OperationsAlert {
   workerName: string | null;
 }
 
+/**
+ * Manual Forge treasury ledger.
+ * Cost basis and NAV fields are independent of mining production math.
+ */
 export interface TreasuryPosition {
+  /** Total BTC currently held (wallet / custody). */
   btcHoldings: number;
+  /** Average USD cost basis per BTC held. */
   avgAcquisitionPriceUsd: number;
+  /** BTC accumulated via mining (lifetime / tracked). */
+  btcMined: number;
+  /** BTC purchased on market. */
+  btcPurchased: number;
+  /** BTC sold. */
+  btcSold: number;
+  /** BTC transferred in/out (net; positive = in). */
+  btcTransferred: number;
+  /** Explicit total BTC cost basis in USD (overrides holdings × avg when set). */
+  btcCostBasisUsd: number | null;
+  /** USD cash / dry powder. */
+  cashReserveUsd: number;
+  /** Miner hardware book value (USD). */
+  minerHardwareBookValueUsd: number;
+  /** Other assets (USD). */
+  otherAssetsUsd: number;
+  /** Total liabilities (USD). */
+  liabilitiesUsd: number;
+  /** Expected net BTC added per month (manual planning rate). */
   monthlyAccumulationBtc: number;
   targetBtc: number;
   source: 'manual';
