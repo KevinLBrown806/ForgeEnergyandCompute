@@ -65,6 +65,20 @@ export function blockSubsidyBtc(height: number): number {
   return 50 / 2 ** era;
 }
 
+/** mempool.space remainingTime is milliseconds; remainingBlocks / 144 is the fallback. */
+export function estimateDaysUntilAdjustment(
+  remainingBlocks: number | undefined,
+  remainingTimeMs: number | undefined,
+): number | null {
+  if (typeof remainingBlocks === 'number' && remainingBlocks >= 0) {
+    return remainingBlocks / 144;
+  }
+  if (typeof remainingTimeMs === 'number' && remainingTimeMs >= 0) {
+    return remainingTimeMs / 86_400_000;
+  }
+  return null;
+}
+
 export async function fetchLiveMarketQuote(): Promise<MarketQuote> {
   const fresh = cache.get<MarketQuote>('market');
   if (fresh) return { ...fresh, stale: false };
@@ -139,8 +153,10 @@ export async function fetchLiveNetworkSnapshot(): Promise<NetworkSnapshot> {
         typeof difficulty.remainingBlocks === 'number'
           ? difficulty.remainingBlocks
           : null,
-      daysUntilAdjustment:
-        typeof remainingTime === 'number' ? remainingTime / 86_400 : null,
+      daysUntilAdjustment: estimateDaysUntilAdjustment(
+        difficulty.remainingBlocks,
+        remainingTime,
+      ),
       provider: 'mempool.space',
       source: 'LIVE',
       fetchedAt: now,
