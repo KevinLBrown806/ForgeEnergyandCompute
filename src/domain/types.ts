@@ -7,26 +7,48 @@
  * Inventory / ledger status for a registered miner asset.
  * Distinct from live pool health (`MinerHealthState`).
  *
- * ORDERED / DECOMMISSIONED never contribute to active production.
- * REPAIR maps to maintenance; ONLINE production requires active + enabled.
+ * ORDERED / SHIPPING / DEPLOYING / RETIRED / SOLD / DECOMMISSIONED
+ * never contribute to active production.
+ * ONLINE production requires an online/active + enabled asset.
+ *
+ * Legacy values `active` (= online) and `maintenance` (= repair) are kept
+ * so stored v1.1 records and existing tests remain valid.
  */
 export type MinerAssetStatus =
   | 'active'
+  | 'online'
+  | 'offline'
   | 'maintenance'
+  | 'repair'
   | 'spare'
   | 'retired'
   | 'ordered'
+  | 'shipping'
+  | 'deploying'
+  | 'sold'
   | 'decommissioned';
 
 /** Operational display labels for ledger status (owner-facing). */
 export const MINER_ASSET_STATUS_LABEL: Record<MinerAssetStatus, string> = {
   active: 'ONLINE',
+  online: 'ONLINE',
+  offline: 'OFFLINE',
   maintenance: 'REPAIR',
+  repair: 'REPAIR',
   spare: 'SPARE',
-  retired: 'DECOMMISSIONED',
+  retired: 'RETIRED',
   ordered: 'ORDERED',
+  shipping: 'SHIPPING',
+  deploying: 'DEPLOYING',
+  sold: 'SOLD',
   decommissioned: 'DECOMMISSIONED',
 };
+
+/** Statuses that can contribute to live production when enabled. */
+export const PRODUCTION_STATUSES: readonly MinerAssetStatus[] = [
+  'active',
+  'online',
+];
 
 export type MinerHealthState =
   | 'ONLINE'
@@ -49,6 +71,25 @@ export type AlertKind =
   | 'auth_required'
   | 'stale_telemetry';
 
+export type FleetExceptionKind =
+  | 'HASHRATE_LOW'
+  | 'MINER_OFFLINE'
+  | 'WORKER_UNMATCHED'
+  | 'NO_RECENT_DATA'
+  | 'EFFICIENCY_BELOW_TARGET';
+
+export interface FleetException {
+  id: string;
+  kind: FleetExceptionKind;
+  severity: AlertSeverity;
+  miner: string | null;
+  minerId: string | null;
+  reason: string;
+  observedValue: string | null;
+  expectedValue: string | null;
+  timestamp: string;
+}
+
 export interface MinerAsset {
   id: string;
   /** Manufacturer, e. and Bitmain / MicroBT. */
@@ -70,10 +111,18 @@ export interface MinerAsset {
   efficiencyJTh: number | null;
   /** Purchase / acquisition date (ISO date). */
   acquisitionDate: string | null;
-  /** Purchase price per unit or lot, USD. */
+  /** Hardware purchase price per unit or lot, USD. Not an operating expense. */
   acquisitionCostUsd: number | null;
+  /** Shipping / freight, USD (lot). */
+  shippingCostUsd?: number | null;
+  /** Deployment / install cost, USD (lot). */
+  deploymentCostUsd?: number | null;
+  /** Date the unit was energized (ISO date). */
+  deploymentDate?: string | null;
   hostingProvider: string;
   facility: string;
+  /** Optional link to a first-class facility record. */
+  facilityId?: string | null;
   electricityRatePerKwh: number | null;
   monthlyHostingFeeUsd: number | null;
   pool: string;
@@ -103,6 +152,10 @@ export interface PoolWorker {
   shares5m: number;
   shares60m: number;
   shares24h: number;
+  /** Rejected shares in 24h when the pool reports them. */
+  rejectedShares24h?: number | null;
+  /** Stale shares in 24h when the pool reports them. */
+  staleShares24h?: number | null;
 }
 
 export interface MiningReward {
@@ -237,6 +290,113 @@ export interface TreasuryPosition {
   monthlyAccumulationBtc: number;
   targetBtc: number;
   source: 'manual';
+  updatedAt: string;
+}
+
+export type TreasuryTransactionType =
+  | 'BTC_MINED'
+  | 'BTC_PURCHASE'
+  | 'BTC_SALE'
+  | 'BTC_TRANSFER_IN'
+  | 'BTC_TRANSFER_OUT'
+  | 'CASH_CONTRIBUTION'
+  | 'CASH_WITHDRAWAL'
+  | 'HARDWARE_PURCHASE'
+  | 'HOSTING_PAYMENT'
+  | 'ELECTRICITY_PAYMENT'
+  | 'OTHER_EXPENSE'
+  | 'OTHER_INCOME';
+
+export type TreasuryAsset = 'BTC' | 'USD';
+
+export interface TreasuryTransaction {
+  id: string;
+  date: string;
+  transactionType: TreasuryTransactionType;
+  asset: TreasuryAsset;
+  quantity: number;
+  unitPrice: number | null;
+  grossAmount: number;
+  fee: number;
+  counterparty: string;
+  account: string;
+  minerId: string | null;
+  facilityId: string | null;
+  memo: string;
+  source: 'manual' | 'live' | 'imported';
+  externalReference: string | null;
+  createdAt: string;
+}
+
+export type TreasuryTransactionInput = Omit<TreasuryTransaction, 'createdAt'> & {
+  createdAt?: string;
+};
+
+export type FacilityStatus = 'active' | 'contracted' | 'planned' | 'ended';
+
+export interface Facility {
+  id: string;
+  provider: string;
+  facilityName: string;
+  location: string;
+  contractedMW: number;
+  deployedMW: number;
+  electricityRate: number | null;
+  hostingFee: number | null;
+  agreementStart: string | null;
+  agreementEnd: string | null;
+  status: FacilityStatus;
+  notes: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type FacilityInput = Omit<Facility, 'id' | 'createdAt' | 'updatedAt'> & {
+  id?: string;
+};
+
+export type LiabilityKind =
+  | 'equipment_financing'
+  | 'hosting_payable'
+  | 'other';
+
+export interface Liability {
+  id: string;
+  kind: LiabilityKind;
+  label: string;
+  amountUsd: number;
+  counterparty: string;
+  notes: string;
+  asOf: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type LiabilityInput = Omit<Liability, 'id' | 'createdAt' | 'updatedAt'> & {
+  id?: string;
+};
+
+export type CapitalBucketId =
+  | 'bitcoin_treasury'
+  | 'mining_hardware'
+  | 'energy_infrastructure'
+  | 'liquidity_cash'
+  | 'other';
+
+export interface CapitalAllocationTarget {
+  bucket: CapitalBucketId;
+  label: string;
+  targetPct: number;
+}
+
+export interface OwnerAssumptions {
+  poolFeePct: number;
+  uptimePct: number;
+  defaultElectricityRatePerKwh: number;
+  efficiencyTargetJTh: number | null;
+  monthlyAccumulationBtc: number;
+  targetBtc: number;
+  otherAssetsUsd: number;
   updatedAt: string;
 }
 

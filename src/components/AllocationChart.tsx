@@ -5,7 +5,7 @@ interface AllocationChartProps {
   slices: AllocationSlice[];
 }
 
-const COLORS = ['var(--btc)', '#4aa8ff', '#3ddc97', '#8b93a7'];
+const COLORS = ['var(--btc)', '#4aa8ff', '#3ddc97', '#8b93a7', '#c084fc'];
 const SIZE = 200;
 const R = 80;
 const STROKE = 26;

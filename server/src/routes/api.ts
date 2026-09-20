@@ -17,6 +17,10 @@ import {
   verifyOperatorPassword,
 } from '../middleware/auth.js';
 import { safeErrorMessage } from '../middleware/security.js';
+import {
+  fetchLiveMarketQuote,
+  fetchLiveNetworkSnapshot,
+} from '../services/market.js';
 
 export const apiRouter = Router();
 
@@ -29,6 +33,50 @@ apiRouter.get('/health', (_req, res) => {
     authConfigured: env.authConfigured,
     timestamp: new Date().toISOString(),
   });
+});
+
+apiRouter.get('/market/snapshot', async (_req, res) => {
+  try {
+    const quote = await fetchLiveMarketQuote();
+    res.json({ ok: true, ...quote, error: null });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      btcPriceUsd: null,
+      change24hPct: null,
+      timestamp: null,
+      provider: 'coingecko',
+      source: 'MODELED',
+      fetchedAt: null,
+      stale: false,
+      error: safeErrorMessage(err),
+    });
+  }
+});
+
+apiRouter.get('/network/snapshot', async (_req, res) => {
+  try {
+    const network = await fetchLiveNetworkSnapshot();
+    res.json({ ok: true, ...network, error: null });
+  } catch (err) {
+    res.status(502).json({
+      ok: false,
+      networkHashrateEhs: null,
+      difficulty: null,
+      blockHeight: null,
+      blockSubsidyBtc: null,
+      blocksPerDay: 144,
+      nextDifficultyChangePct: null,
+      estimatedRetargetDate: null,
+      remainingBlocks: null,
+      daysUntilAdjustment: null,
+      provider: 'mempool.space',
+      source: 'MODELED',
+      fetchedAt: null,
+      stale: false,
+      error: safeErrorMessage(err),
+    });
+  }
 });
 
 apiRouter.get('/auth/session', (req, res) => {

@@ -1,8 +1,20 @@
-import type { MinerAsset, MinerAssetInput, TreasuryPosition } from '../domain/types';
+import type {
+  CapitalAllocationTarget,
+  Facility,
+  FacilityInput,
+  Liability,
+  LiabilityInput,
+  MinerAsset,
+  MinerAssetInput,
+  OwnerAssumptions,
+  TreasuryPosition,
+  TreasuryTransaction,
+  TreasuryTransactionInput,
+} from '../domain/types';
 
 /**
  * Persistence abstraction for fleet inventory.
- * v1.1: localStorage implementation. Swap for a server repository later
+ * localStorage implementation. Swap for a server repository later
  * without rewriting UI components.
  */
 export interface FleetRepository {
@@ -17,6 +29,35 @@ export interface FleetRepository {
 export interface TreasuryRepository {
   get(): Promise<TreasuryPosition>;
   save(position: TreasuryPosition): Promise<TreasuryPosition>;
+}
+
+export interface TreasuryLedgerRepository {
+  list(): Promise<TreasuryTransaction[]>;
+  append(input: TreasuryTransactionInput): Promise<TreasuryTransaction>;
+  remove(id: string): Promise<void>;
+}
+
+export interface FacilityRepository {
+  list(): Promise<Facility[]>;
+  create(input: FacilityInput): Promise<Facility>;
+  update(id: string, patch: Partial<FacilityInput>): Promise<Facility>;
+  remove(id: string): Promise<void>;
+}
+
+export interface LiabilityRepository {
+  list(): Promise<Liability[]>;
+  create(input: LiabilityInput): Promise<Liability>;
+  update(id: string, patch: Partial<LiabilityInput>): Promise<Liability>;
+  remove(id: string): Promise<void>;
+}
+
+export interface OwnerSettingsRepository {
+  getAssumptions(): Promise<OwnerAssumptions>;
+  saveAssumptions(next: OwnerAssumptions): Promise<OwnerAssumptions>;
+  getAllocationTargets(): Promise<CapitalAllocationTarget[]>;
+  saveAllocationTargets(
+    targets: CapitalAllocationTarget[],
+  ): Promise<CapitalAllocationTarget[]>;
 }
 
 export interface DemoModeStore {

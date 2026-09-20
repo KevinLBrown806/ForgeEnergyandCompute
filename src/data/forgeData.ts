@@ -7,10 +7,21 @@
  */
 
 export {
+  createForgeMarketProvider,
   createLocalMarketProvider,
+  mergeMarketSnapshot,
+  modeledMarketQuote,
   type MarketProvider,
+  type MarketQuote,
   type MarketSnapshot,
 } from './providers/marketProvider';
+
+export {
+  createForgeNetworkProvider,
+  createLocalNetworkProvider,
+  type NetworkProvider,
+  type NetworkSnapshot,
+} from './providers/networkProvider';
 
 export {
   createForgeMiningPoolProvider,

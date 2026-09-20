@@ -14,20 +14,24 @@ Every primary KPI is tagged:
 
 | Source | Meaning |
 | --- | --- |
-| **LIVE** | Automatically sourced from an external system (e.g. Braiins) |
-| **MANUAL** | Entered from Forge company records (registry / treasury editor) |
+| **LIVE** | Automatically sourced from a verified external system (Braiins, CoinGecko, mempool.space) |
+| **MANUAL** | Entered from Forge company records (owner ledger / data management) |
 | **MODELED** | Calculated using assumptions or scenarios |
+| **DERIVED** | Computed from other LIVE / MANUAL / MODELED inputs, with inspectable dependencies |
 
 ## Architecture
 
 - `src/config/forge.config.ts` — domain-organized `forgeData` (company, actuals, fleet, treasury, energy, market, assumptions, scenarios, roadmap)
 - `src/domain/` — canonical fleet, worker, reward, payout, alert, and treasury DTOs plus pure matching/health/aggregation logic
-- `src/domain/dataSource.ts` — `LIVE` / `MANUAL` / `MODELED` provenance types
-- `src/data/providers/` — swap-ready market, mining-pool, and accounting adapters
-- `src/adapters/localStorage.ts` — browser persistence behind repository interfaces
-- `src/services/forgeApi.ts` — the only frontend path to pool telemetry
-- `src/lib/mining.ts` — pure mining economics engine (forecast + ledger projections)
-- `src/lib/treasury.ts` — treasury valuation & Forge NAV
+- `src/domain/dataSource.ts` — `LIVE` / `MANUAL` / `MODELED` / `DERIVED` provenance types
+- `src/data/providers/` — swap-ready market, network, mining-pool, and Found accounting adapters
+- `src/adapters/localStorage.ts` — owner ledger persistence behind repository interfaces
+- `src/services/forgeApi.ts` — the only frontend path to Forge API (Braiins, market, network)
+- `src/lib/mining.ts` — pure mining economics engine
+- `src/lib/unitEconomics.ts` — per-miner unit economics and breakevens
+- `src/lib/treasuryLedger.ts` — append-only treasury transaction aggregation
+- `src/lib/nav.ts` — NAV from assets and liabilities
+- `src/lib/treasury.ts` — treasury valuation helper (manual position overlay)
 - `server/` — Node/TypeScript Forge API (Braiins token stays server-side)
 
 The default fleet and treasury are empty. Demo mode is opt-in and clearly
@@ -89,6 +93,8 @@ requests by about five seconds, and applies a 12-second request timeout.
 Routes:
 
 - `GET /api/health`
+- `GET /api/market/snapshot` — public BTC/USD (CoinGecko proxy, no auth)
+- `GET /api/network/snapshot` — public Bitcoin network (mempool.space proxy, no auth)
 - `GET /api/mining/summary`
 - `GET /api/braiins/stats`
 - `GET /api/braiins/workers`
@@ -151,11 +157,12 @@ A payouts or rewards failure does not erase worker telemetry. The API returns
 `sources: { profile, workers, rewards, payouts }` with per-source `ok` / `error` /
 `stale`, and keeps last-known-good cache where available.
 
-### LIVE vs MANUAL vs MODELED
+### LIVE vs MANUAL vs MODELED vs DERIVED
 
-- **LIVE** — worker state, hashrates, shares, pool rewards, payouts, balances
-- **MANUAL** — fleet registry inventory, treasury holdings, cost basis, cash
-- **MODELED** — estimated revenue/cost/EBITDA from hashrate × assumptions; calculator scenarios
+- **LIVE** — Braiins workers/rewards/payouts; CoinGecko BTC spot; mempool.space hashrate/difficulty/height
+- **MANUAL** — miner assets, facilities, treasury transactions, liabilities, assumptions
+- **MODELED** — unit economics, pool fee, uptime, calculator scenarios; fallback market/network
+- **DERIVED** — NAV, mining revenue/profit, allocation shares (inspectable dependencies)
 
 ## Deployment
 

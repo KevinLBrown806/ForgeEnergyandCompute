@@ -1,22 +1,26 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { AccumulationChart } from './components/AccumulationChart';
 import { AllocationChart } from './components/AllocationChart';
+import { DataManagement } from './components/DataManagement';
 import { DataProvenancePanel } from './components/DataProvenancePanel';
+import { FleetCapital } from './components/FleetCapital';
 import { FleetRegistry } from './components/FleetRegistry';
 import { MiningCalculator } from './components/MiningCalculator';
 import { Nav } from './components/Nav';
-import { OperationsAlerts } from './components/OperationsAlerts';
+import { OperationsExceptions } from './components/OperationsExceptions';
 import { OperatorLogin } from './components/OperatorLogin';
 import { StatCard } from './components/StatCard';
-import { TreasuryEditor } from './components/TreasuryEditor';
 import { WorkersPanel } from './components/WorkersPanel';
 import {
   createLocalDemoModeStore,
+  createLocalFacilityRepository,
   createLocalFleetRepository,
+  createLocalLiabilityRepository,
+  createLocalOwnerSettingsRepository,
+  createLocalTreasuryLedgerRepository,
   createLocalTreasuryRepository,
 } from './adapters/localStorage';
 import {
-  capitalAllocation,
   energy,
   flywheel,
   infrastructureRoadmap,
@@ -27,18 +31,36 @@ import {
   type RoadmapStatus,
 } from './config/forge.config';
 import { DEMO_FLEET } from './config/demoFleet';
+import {
+  allocationFromPosition,
+  DEFAULT_ALLOCATION_TARGETS,
+  toChartSlices,
+} from './domain/capital';
+import { capitalRecoveryForFleet } from './domain/capitalRecovery';
 import { DataSource } from './domain/dataSource';
+import { buildFleetExceptions } from './domain/exceptions';
+import { aggregateFacilities } from './domain/facilities';
 import {
   aggregateFleet,
   buildFleetRows,
-  buildOperationsAlerts,
   isProductionEligible,
 } from './domain/fleet';
+import { aggregateFleetCapital } from './domain/ledger';
+import { matchFleetWorkers } from './domain/matching';
+import { buildOwnerKpis } from './domain/ownerKpis';
 import type {
+  CapitalAllocationTarget,
+  Facility,
+  FacilityInput,
+  Liability,
+  LiabilityInput,
   MinerAsset,
   MinerAssetInput,
+  OwnerAssumptions,
   MiningSummaryResponse,
   TreasuryPosition,
+  TreasuryTransaction,
+  TreasuryTransactionInput,
 } from './domain/types';
 import {
   formatBtc,
@@ -58,19 +80,39 @@ import {
 } from './lib/mining';
 import { computeTreasury } from './lib/treasury';
 import {
+  aggregateTreasuryLedger,
+  ledgerByPeriod,
+} from './lib/treasuryLedger';
+import { computeNav } from './lib/nav';
+import { computeUnitEconomics } from './lib/unitEconomics';
+import {
   fetchAuthSession,
   fetchMiningSummary,
   loginOperator,
   logoutOperator,
   type AuthSession,
 } from './services/forgeApi';
-import { createLocalMarketProvider } from './data/forgeData';
+import {
+  createForgeMarketProvider,
+  createForgeNetworkProvider,
+  createStubAccountingProvider,
+  mergeMarketSnapshot,
+  modeledMarketQuote,
+  type MarketSnapshot,
+} from './data/forgeData';
+import { modeledNetworkSnapshot } from './data/providers/networkProvider';
 import { DAYS_PER_MONTH } from './lib/estimator';
 
 const fleetRepository = createLocalFleetRepository();
 const treasuryRepository = createLocalTreasuryRepository();
+const ledgerRepository = createLocalTreasuryLedgerRepository();
+const facilityRepository = createLocalFacilityRepository();
+const liabilityRepository = createLocalLiabilityRepository();
+const settingsRepository = createLocalOwnerSettingsRepository();
 const demoModeStore = createLocalDemoModeStore();
-const marketProvider = createLocalMarketProvider();
+const marketProvider = createForgeMarketProvider();
+const networkProvider = createForgeNetworkProvider();
+const accountingProvider = createStubAccountingProvider();
 
 const EMPTY_SUMMARY: MiningSummaryResponse = {
   ok: false,
@@ -112,11 +154,37 @@ const DEFAULT_TREASURY: TreasuryPosition = {
 
 const NOT_TRACKED = 'Not yet tracked';
 
+const DEFAULT_ASSUMPTIONS: OwnerAssumptions = {
+  poolFeePct: market.poolFeePct,
+  uptimePct: market.uptimePct,
+  defaultElectricityRatePerKwh: energy.avgElectricityRatePerKwh,
+  efficiencyTargetJTh: null,
+  monthlyAccumulationBtc: treasuryDefaults.monthlyAccumulationBtc,
+  targetBtc: treasuryDefaults.targetBtc,
+  otherAssetsUsd: 0,
+  updatedAt: new Date(0).toISOString(),
+};
+
+const DEFAULT_MARKET: MarketSnapshot = mergeMarketSnapshot(
+  modeledMarketQuote(),
+  modeledNetworkSnapshot(),
+);
+
 function App() {
   const [storedAssets, setStoredAssets] = useState<MinerAsset[]>([]);
   const [demoMode, setDemoMode] = useState(false);
   const [treasury, setTreasury] =
     useState<TreasuryPosition>(DEFAULT_TREASURY);
+  const [transactions, setTransactions] = useState<TreasuryTransaction[]>([]);
+  const [facilities, setFacilities] = useState<Facility[]>([]);
+  const [liabilities, setLiabilities] = useState<Liability[]>([]);
+  const [assumptions, setAssumptions] =
+    useState<OwnerAssumptions>(DEFAULT_ASSUMPTIONS);
+  const [allocationTargets, setAllocationTargets] = useState<
+    CapitalAllocationTarget[]
+  >(DEFAULT_ALLOCATION_TARGETS);
+  const [marketSnap, setMarketSnap] = useState<MarketSnapshot>(DEFAULT_MARKET);
+  const [accountingConnected, setAccountingConnected] = useState(false);
   const [pool, setPool] = useState<MiningSummaryResponse>(EMPTY_SUMMARY);
   const [poolLoading, setPoolLoading] = useState(true);
   const [authSession, setAuthSession] = useState<AuthSession>(EMPTY_AUTH);
@@ -124,6 +192,26 @@ function App() {
 
   const reloadFleet = useCallback(async () => {
     setStoredAssets(await fleetRepository.list());
+  }, []);
+
+  const reloadOwnerLedger = useCallback(async () => {
+    const [assets, position, txs, facs, liabs, assum, targets] =
+      await Promise.all([
+        fleetRepository.list(),
+        treasuryRepository.get(),
+        ledgerRepository.list(),
+        facilityRepository.list(),
+        liabilityRepository.list(),
+        settingsRepository.getAssumptions(),
+        settingsRepository.getAllocationTargets(),
+      ]);
+    setStoredAssets(assets);
+    setTreasury(position);
+    setTransactions(txs);
+    setFacilities(facs);
+    setLiabilities(liabs);
+    setAssumptions(assum);
+    setAllocationTargets(targets);
   }, []);
 
   const reloadPool = useCallback(async () => {
@@ -159,15 +247,44 @@ function App() {
     void Promise.all([
       fleetRepository.list(),
       treasuryRepository.get(),
+      ledgerRepository.list(),
+      facilityRepository.list(),
+      liabilityRepository.list(),
+      settingsRepository.getAssumptions(),
+      settingsRepository.getAllocationTargets(),
       demoModeStore.isDemoMode(),
-      marketProvider.getSnapshot(),
-    ]).then(([assets, position, isDemo, marketSnap]) => {
-      if (controller.signal.aborted) return;
-      setStoredAssets(assets);
-      setTreasury(position);
-      setDemoMode(isDemo);
-      setBtcPerThDay(marketSnap.btcPerThPerDay);
-    });
+      marketProvider.getQuote(),
+      networkProvider.getSnapshot(),
+      accountingProvider.getSnapshot(),
+    ]).then(
+      ([
+        assets,
+        position,
+        txs,
+        facs,
+        liabs,
+        assum,
+        targets,
+        isDemo,
+        quote,
+        network,
+        accounting,
+      ]) => {
+        if (controller.signal.aborted) return;
+        setStoredAssets(assets);
+        setTreasury(position);
+        setTransactions(txs);
+        setFacilities(facs);
+        setLiabilities(liabs);
+        setAssumptions(assum);
+        setAllocationTargets(targets);
+        setDemoMode(isDemo);
+        const snap = mergeMarketSnapshot(quote, network);
+        setMarketSnap(snap);
+        setBtcPerThDay(snap.btcPerThPerDay);
+        setAccountingConnected(accounting.connected);
+      },
+    );
     void Promise.all([
       fetchAuthSession(controller.signal),
       fetchMiningSummary(controller.signal),
@@ -195,17 +312,25 @@ function App() {
   }, []);
 
   const assets = demoMode ? DEMO_FLEET : storedAssets;
+  const operatingAssets = storedAssets;
   const rows = useMemo(
     () =>
       buildFleetRows({
         assets,
         workers: pool.workers,
         btcPerThPerDay: btcPerThDay,
-        btcPriceUsd: market.btcPriceUsd,
-        poolFeePct: market.poolFeePct,
-        defaultElectricityRatePerKwh: energy.avgElectricityRatePerKwh,
+        btcPriceUsd: marketSnap.btcPriceUsd,
+        poolFeePct: assumptions.poolFeePct,
+        defaultElectricityRatePerKwh: assumptions.defaultElectricityRatePerKwh,
       }),
-    [assets, pool.workers, btcPerThDay],
+    [
+      assets,
+      assumptions.defaultElectricityRatePerKwh,
+      assumptions.poolFeePct,
+      marketSnap.btcPriceUsd,
+      pool.workers,
+      btcPerThDay,
+    ],
   );
   const aggregate = useMemo(
     () =>
@@ -218,18 +343,58 @@ function App() {
       }),
     [pool.account, pool.payouts, pool.rewards, rows],
   );
-  const alerts = useMemo(
+  const ownerRows = useMemo(
     () =>
-      buildOperationsAlerts({
-        rows,
+      buildFleetRows({
+        assets: operatingAssets,
         workers: pool.workers,
-        poolConfigured: pool.configured,
-        poolError: pool.error,
-        sources: pool.sources,
-        stale: pool.stale,
+        btcPerThPerDay: btcPerThDay,
+        btcPriceUsd: marketSnap.btcPriceUsd,
+        poolFeePct: assumptions.poolFeePct,
+        defaultElectricityRatePerKwh: assumptions.defaultElectricityRatePerKwh,
       }),
-    [pool.configured, pool.error, pool.sources, pool.stale, pool.workers, rows],
+    [
+      operatingAssets,
+      assumptions.defaultElectricityRatePerKwh,
+      assumptions.poolFeePct,
+      marketSnap.btcPriceUsd,
+      pool.workers,
+      btcPerThDay,
+    ],
   );
+  const ownerAggregate = useMemo(
+    () =>
+      aggregateFleet({
+        rows: ownerRows,
+        rewards: pool.rewards,
+        payouts: pool.payouts,
+        unpaidBalanceBtc: pool.account?.currentBalanceBtc ?? null,
+        btcEarnedToday: pool.account?.todayRewardBtc ?? null,
+      }),
+    [ownerRows, pool.account, pool.payouts, pool.rewards],
+  );
+  const exceptions = useMemo(
+    () =>
+      buildFleetExceptions({
+        rows: ownerRows,
+        workers: pool.workers,
+        efficiencyTargetJTh: assumptions.efficiencyTargetJTh,
+      }),
+    [assumptions.efficiencyTargetJTh, ownerRows, pool.workers],
+  );
+  const matchReport = useMemo(
+    () => matchFleetWorkers(assets, pool.workers),
+    [assets, pool.workers],
+  );
+  const ledgerTotals = useMemo(
+    () => aggregateTreasuryLedger(transactions),
+    [transactions],
+  );
+  const periodSlices = useMemo(
+    () => ledgerByPeriod(transactions),
+    [transactions],
+  );
+  const hasLedger = transactions.length > 0;
 
   const activeAssets = useMemo(
     () => assets.filter(isProductionEligible),
@@ -251,36 +416,144 @@ function App() {
   const fleetPowerKw =
     activeAssets.reduce((s, a) => s + a.quantity * a.wattage, 0) / 1000;
 
+  const effectiveTreasury: TreasuryPosition = hasLedger
+    ? {
+        ...treasury,
+        btcHoldings: ledgerTotals.btcHoldings,
+        avgAcquisitionPriceUsd: ledgerTotals.avgAcquisitionPriceUsd,
+        btcMined: ledgerTotals.btcMined,
+        btcPurchased: ledgerTotals.btcPurchased,
+        btcSold: ledgerTotals.btcSold,
+        btcTransferred: ledgerTotals.btcTransferred,
+        btcCostBasisUsd: ledgerTotals.purchasedCostBasisUsd,
+        cashReserveUsd: ledgerTotals.cashReserveUsd,
+        monthlyAccumulationBtc: assumptions.monthlyAccumulationBtc,
+        targetBtc: assumptions.targetBtc || treasury.targetBtc,
+      }
+    : treasury;
+
   const treasuryResult = computeTreasury({
-    ...treasury,
-    btcPriceUsd: market.btcPriceUsd,
+    ...effectiveTreasury,
+    btcPriceUsd: marketSnap.btcPriceUsd,
   });
 
+  const capitalTotals = aggregateFleetCapital(
+    operatingAssets,
+    treasury.minerHardwareBookValueUsd,
+  );
   const hardwareBook =
-    treasury.minerHardwareBookValueUsd > 0
-      ? treasury.minerHardwareBookValueUsd
-      : assets.reduce(
-          (s, a) => s + (a.acquisitionCostUsd ?? 0) * a.quantity,
-          0,
-        );
+    capitalTotals.estimatedHardwareBookValueUsd ??
+    treasury.minerHardwareBookValueUsd;
   const fleetHardwareRoi = simpleHardwareRoiAnnual(
-    aggregate.miningContributionMonthlyUsd,
+    ownerAggregate.miningContributionMonthlyUsd,
     hardwareBook,
   );
 
   const costPerBtc = costToMineOneBtcUsd(
-    aggregate.operatingExpensesMonthlyUsd,
-    aggregate.estimatedMonthlyBtc,
+    ownerAggregate.operatingExpensesMonthlyUsd,
+    ownerAggregate.estimatedMonthlyBtc,
   );
 
-  const minerLoadMw = fleetPowerKw / 1000;
-  const utilization =
-    energy.availableMw > 0 ? energy.deployedMw / energy.availableMw : 0;
-
   /** BTC MTD: prefer LIVE pool rewards; otherwise MODELED estimate. */
-  const btcMinedMtdLive = aggregate.btcEarned30d;
-  const btcMinedMtdModeled = aggregate.estimatedMonthlyBtc;
+  const btcMinedMtdLive = ownerAggregate.btcEarned30d;
+  const btcMinedMtdModeled = ownerAggregate.estimatedMonthlyBtc;
   const hasLiveMtd = btcMinedMtdLive != null;
+
+  const minerLoadMw = fleetPowerKw / 1000;
+  const facilityAgg = aggregateFacilities(facilities, operatingAssets);
+  const utilization =
+    (facilityAgg.contractedMW || energy.availableMw) > 0
+      ? (facilityAgg.deployedMW || energy.deployedMw) /
+        (facilityAgg.contractedMW || energy.availableMw)
+      : 0;
+
+  const financingUsd = liabilities
+    .filter((l) => l.kind === 'equipment_financing')
+    .reduce((s, l) => s + l.amountUsd, 0);
+  const hostingPayableUsd = liabilities
+    .filter((l) => l.kind === 'hosting_payable')
+    .reduce((s, l) => s + l.amountUsd, 0);
+  const otherLiabUsd = liabilities
+    .filter((l) => l.kind === 'other')
+    .reduce((s, l) => s + l.amountUsd, 0);
+  const liabilityTotal =
+    liabilities.length > 0
+      ? financingUsd + hostingPayableUsd + otherLiabUsd
+      : effectiveTreasury.liabilitiesUsd;
+
+  const nav = computeNav({
+    btcHoldings: effectiveTreasury.btcHoldings,
+    btcPriceUsd: marketSnap.btcPriceUsd,
+    btcPriceSource: marketSnap.btcPriceSource,
+    btcCostBasisUsd:
+      effectiveTreasury.btcCostBasisUsd ??
+      effectiveTreasury.btcHoldings * effectiveTreasury.avgAcquisitionPriceUsd,
+    cashUsd: effectiveTreasury.cashReserveUsd,
+    minerHardwareBookValueUsd: hardwareBook,
+    otherAssetsUsd:
+      assumptions.otherAssetsUsd || effectiveTreasury.otherAssetsUsd,
+    equipmentFinancingUsd: financingUsd,
+    hostingPayableUsd,
+    otherLiabilitiesUsd:
+      liabilities.length > 0 ? otherLiabUsd : effectiveTreasury.liabilitiesUsd,
+    btcMinedLifetime: effectiveTreasury.btcMined,
+    btcPurchasedLifetime: effectiveTreasury.btcPurchased,
+  });
+
+  const ownerKpis = buildOwnerKpis({
+    navUsd: nav.netAssetValueUsd,
+    btcHoldings: effectiveTreasury.btcHoldings,
+    btcProduced: hasLiveMtd
+      ? (btcMinedMtdLive as number)
+      : effectiveTreasury.btcMined,
+    btcProducedSource: hasLiveMtd
+      ? DataSource.LIVE
+      : effectiveTreasury.btcMined > 0
+        ? DataSource.MANUAL
+        : DataSource.MODELED,
+    operatingHashrateTh:
+      ownerAggregate.currentHashrateTh || ownerAggregate.expectedHashrateTh,
+    hashrateSource:
+      ownerAggregate.currentHashrateTh > 0 ? DataSource.LIVE : DataSource.MANUAL,
+    miningRevenueUsd: ownerAggregate.grossMiningRevenueMonthlyUsd,
+    miningOperatingCostUsd: ownerAggregate.operatingExpensesMonthlyUsd,
+    fleetBookValueUsd: hardwareBook,
+    deployedCapitalUsd: capitalTotals.totalDeployedCapitalUsd,
+    btcPriceSource: marketSnap.btcPriceSource,
+    networkSource: marketSnap.networkSource,
+  });
+
+  const allocation = allocationFromPosition(
+    {
+      bitcoinTreasuryUsd: nav.btcTreasuryMarketValueUsd,
+      miningHardwareUsd: hardwareBook,
+      energyInfrastructureUsd: 0,
+      liquidityCashUsd: nav.cashUsd,
+      otherUsd: nav.otherAssetsUsd,
+    },
+    allocationTargets,
+  );
+  const allocationSlices = toChartSlices(allocation);
+  const recovery = capitalRecoveryForFleet(operatingAssets, transactions);
+  const unitEconomics = assets.filter(isProductionEligible).map((asset) => ({
+    asset,
+    economics: computeUnitEconomics({
+      quantity: asset.quantity,
+      hashrateTh: asset.nominalHashrateTh,
+      watts: asset.wattage,
+      electricityRatePerKwh:
+        asset.electricityRatePerKwh ?? assumptions.defaultElectricityRatePerKwh,
+      hostingFeeUsdPerMonth: asset.monthlyHostingFeeUsd ?? 0,
+      btcPriceUsd: marketSnap.btcPriceUsd,
+      btcPerThPerDay: btcPerThDay,
+      poolFeePct: assumptions.poolFeePct,
+      uptimePct: assumptions.uptimePct,
+      deployedCapitalUsd:
+        (asset.acquisitionCostUsd ?? 0) * asset.quantity +
+          (asset.shippingCostUsd ?? 0) +
+          (asset.deploymentCostUsd ?? 0) || null,
+    }),
+  }));
 
   const createAsset = async (input: MinerAssetInput) => {
     await fleetRepository.create(input);
@@ -305,6 +578,40 @@ function App() {
   const saveTreasury = async (position: TreasuryPosition) => {
     setTreasury(await treasuryRepository.save(position));
   };
+  const appendTx = async (input: TreasuryTransactionInput) => {
+    await ledgerRepository.append(input);
+    await reloadOwnerLedger();
+  };
+  const removeTx = async (id: string) => {
+    await ledgerRepository.remove(id);
+    await reloadOwnerLedger();
+  };
+  const createFacility = async (input: FacilityInput) => {
+    await facilityRepository.create(input);
+    await reloadOwnerLedger();
+  };
+  const updateFacility = async (id: string, input: FacilityInput) => {
+    await facilityRepository.update(id, input);
+    await reloadOwnerLedger();
+  };
+  const removeFacility = async (id: string) => {
+    await facilityRepository.remove(id);
+    await reloadOwnerLedger();
+  };
+  const createLiability = async (input: LiabilityInput) => {
+    await liabilityRepository.create(input);
+    await reloadOwnerLedger();
+  };
+  const removeLiability = async (id: string) => {
+    await liabilityRepository.remove(id);
+    await reloadOwnerLedger();
+  };
+  const saveAssumptions = async (next: OwnerAssumptions) => {
+    setAssumptions(await settingsRepository.saveAssumptions(next));
+  };
+  const saveAllocation = async (targets: CapitalAllocationTarget[]) => {
+    setAllocationTargets(await settingsRepository.saveAllocationTargets(targets));
+  };
 
   return (
     <div className="page">
@@ -313,16 +620,28 @@ function App() {
       <main>
         <section className="lede-row">
           <div>
-            <p className="eyebrow">Forge OS v1.1 · Live operations</p>
+            <p className="eyebrow">Forge OS v1.2 · Live data + owner ledger</p>
             <h1>Energy → Compute → Bitcoin → Treasury → Infrastructure</h1>
           </div>
           <p className="lede-row__note">
-            Fleet registry + Braiins Pool telemetry
+            Owner ledger + live market/network
             {demoMode ? ' · DEMO MODE' : ''}
+            {marketSnap.btcPriceSource === DataSource.LIVE
+              ? ` · BTC ${marketSnap.priceProvider}`
+              : ' · BTC modeled'}
           </p>
         </section>
 
-        <DataProvenancePanel />
+        <DataProvenancePanel
+          metrics={[
+            { label: 'Total NAV', ...nav.sourced.nav },
+            { label: 'Mining Revenue', ...ownerKpis.miningRevenueUsd },
+            {
+              label: 'Mining Operating Profit',
+              ...ownerKpis.miningOperatingProfitUsd,
+            },
+          ]}
+        />
 
         {(authSession.authRequired && !authSession.authenticated) ||
         pool.code === 'auth_required' ||
@@ -358,68 +677,104 @@ function App() {
         <Section id="overview" title="Executive overview">
           <div className="grid grid--cards grid--owner">
             <StatCard
-              label="Treasury NAV"
-              source={DataSource.MANUAL}
-              value={formatUsdCompact(treasuryResult.forgeNavUsd)}
+              label="Total NAV"
+              source={ownerKpis.totalNav.source}
+              dependencies={ownerKpis.totalNav.dependencies}
+              value={formatUsdCompact(nav.netAssetValueUsd)}
               hint={
-                treasury.btcHoldings > 0 || treasury.cashReserveUsd > 0
-                  ? `Assets ${formatUsdCompact(treasuryResult.totalAssetValueUsd)}`
-                  : 'Enter treasury figures to compute NAV'
+                nav.grossAssetsUsd > 0
+                  ? `Assets ${formatUsdCompact(nav.grossAssetsUsd)}`
+                  : 'Enter owner ledger figures to compute NAV'
               }
               tone="btc"
             />
             <StatCard
               label="BTC Treasury"
-              source={DataSource.MANUAL}
-              value={formatBtc(treasury.btcHoldings)}
-              hint={`Mkt ${formatUsdCompact(treasuryResult.currentValueUsd)}`}
+              source={ownerKpis.btcTreasuryQty.source}
+              value={formatBtc(effectiveTreasury.btcHoldings)}
+              hint={`Mkt ${formatUsdCompact(nav.btcTreasuryMarketValueUsd)}`}
               tone="btc"
             />
             <StatCard
-              label="Fleet Hashrate"
-              source={
-                aggregate.currentHashrateTh > 0
-                  ? DataSource.LIVE
-                  : DataSource.MANUAL
-              }
-              value={formatHashrate(
-                aggregate.currentHashrateTh || aggregate.expectedHashrateTh,
-              )}
-              hint={
-                aggregate.currentHashrateTh > 0
-                  ? `${formatHashrate(aggregate.expectedHashrateTh)} expected`
-                  : 'Nominal from registry'
-              }
-            />
-            <StatCard
-              label="BTC Mined MTD"
-              source={hasLiveMtd ? DataSource.LIVE : DataSource.MODELED}
+              label="BTC Produced"
+              source={ownerKpis.btcProduced.source}
               value={
-                hasLiveMtd
-                  ? formatBtc(btcMinedMtdLive)
-                  : btcMinedMtdModeled > 0
-                    ? formatBtc(btcMinedMtdModeled, 3)
-                    : NOT_TRACKED
+                ownerKpis.btcProduced.value > 0
+                  ? formatBtc(ownerKpis.btcProduced.value)
+                  : NOT_TRACKED
               }
               hint={
                 hasLiveMtd
                   ? 'Pool rewards · 30d'
-                  : btcMinedMtdModeled > 0
-                    ? 'Modeled from hashrate · not settled'
-                    : 'No pool rewards or modeled production yet'
+                  : effectiveTreasury.btcMined > 0
+                    ? 'Owner ledger'
+                    : btcMinedMtdModeled > 0
+                      ? 'Modeled from hashrate'
+                      : 'No production history'
               }
               tone="btc"
             />
             <StatCard
-              label="Mining EBITDA MTD"
-              source={DataSource.MODELED}
-              value={formatUsdCompact(aggregate.miningContributionMonthlyUsd)}
+              label="Operating Hashrate"
+              source={ownerKpis.operatingHashrateTh.source}
+              value={formatHashrate(ownerKpis.operatingHashrateTh.value)}
+              hint={
+                ownerAggregate.currentHashrateTh > 0
+                  ? `${formatHashrate(ownerAggregate.expectedHashrateTh)} expected`
+                  : 'Nominal from registry'
+              }
+            />
+            <StatCard
+              label="Mining Revenue"
+              source={ownerKpis.miningRevenueUsd.source}
+              dependencies={ownerKpis.miningRevenueUsd.dependencies}
+              value={formatUsdCompact(ownerAggregate.grossMiningRevenueMonthlyUsd)}
+              hint="Modeled monthly · not settled"
+            />
+            <StatCard
+              label="Mining Operating Cost"
+              source={ownerKpis.miningOperatingCostUsd.source}
+              dependencies={ownerKpis.miningOperatingCostUsd.dependencies}
+              value={formatUsdCompact(ownerAggregate.operatingExpensesMonthlyUsd)}
+            />
+            <StatCard
+              label="Mining Operating Profit"
+              source={ownerKpis.miningOperatingProfitUsd.source}
+              dependencies={ownerKpis.miningOperatingProfitUsd.dependencies}
+              value={formatUsdCompact(ownerAggregate.miningContributionMonthlyUsd)}
               hint="Modeled contribution · not settled P&amp;L"
               tone={
-                aggregate.miningContributionMonthlyUsd >= 0
+                ownerAggregate.miningContributionMonthlyUsd >= 0
                   ? 'positive'
                   : 'negative'
               }
+            />
+            <StatCard
+              label="Fleet Book Value"
+              source={ownerKpis.fleetBookValueUsd.source}
+              value={
+                hardwareBook > 0 ? formatUsdCompact(hardwareBook) : NOT_TRACKED
+              }
+            />
+            <StatCard
+              label="Deployed Capital"
+              source={ownerKpis.deployedCapitalUsd.source}
+              value={
+                capitalTotals.totalDeployedCapitalUsd == null
+                  ? NOT_TRACKED
+                  : formatUsdCompact(capitalTotals.totalDeployedCapitalUsd)
+              }
+            />
+            <StatCard
+              label="Return on Deployed Capital"
+              source={ownerKpis.returnOnDeployedMiningCapital.source}
+              dependencies={ownerKpis.returnOnDeployedMiningCapital.dependencies}
+              value={
+                ownerKpis.returnOnDeployedMiningCapital.value == null
+                  ? NOT_TRACKED
+                  : formatPercent(ownerKpis.returnOnDeployedMiningCapital.value, 0)
+              }
+              hint="Annualized modeled profit / deployed capital"
             />
           </div>
 
@@ -427,15 +782,15 @@ function App() {
             <StatCard
               label="Online Miners"
               source={DataSource.LIVE}
-              value={formatNumber(aggregate.onlineMiners)}
-              hint={`${aggregate.degradedMiners} degraded · ${aggregate.offlineMiners} offline`}
-              tone={aggregate.offlineMiners ? 'negative' : 'positive'}
+              value={formatNumber(ownerAggregate.onlineMiners)}
+              hint={`${ownerAggregate.degradedMiners} degraded · ${ownerAggregate.offlineMiners} offline`}
+              tone={ownerAggregate.offlineMiners ? 'negative' : 'positive'}
             />
             <StatCard
               label="Registered Miners"
               source={DataSource.MANUAL}
-              value={formatNumber(aggregate.registeredMiners)}
-              hint={`${aggregate.enabledMiners} enabled`}
+              value={formatNumber(ownerAggregate.registeredMiners)}
+              hint={`${ownerAggregate.enabledMiners} enabled`}
             />
             <StatCard
               label="BTC Earned Today"
@@ -460,9 +815,9 @@ function App() {
               label="Fleet Efficiency"
               source={DataSource.MODELED}
               value={
-                aggregate.fleetEfficiencyPct == null
+                ownerAggregate.fleetEfficiencyPct == null
                   ? '—'
-                  : formatPercent(aggregate.fleetEfficiencyPct)
+                  : formatPercent(ownerAggregate.fleetEfficiencyPct)
               }
               hint="5m hashrate / nominal"
             />
@@ -475,109 +830,130 @@ function App() {
             />
           </div>
           <div className="overview-alerts">
-            <OperationsAlerts alerts={alerts} />
+            <OperationsExceptions exceptions={exceptions} />
           </div>
+          {periodSlices.some((s) => s.available && s.period !== 'lifetime') && (
+            <p className="panel__meta period-note">
+              Ledger periods with data:{' '}
+              {periodSlices
+                .filter((s) => s.available)
+                .map((s) => s.period)
+                .join(' · ')}
+            </p>
+          )}
         </Section>
 
-        <Section id="treasury" title="Bitcoin treasury">
-          <div className="split">
-            <div className="grid grid--cards grid--compact">
+        <Section id="treasury" title="Bitcoin treasury / NAV">
+          <div className="found-status">
+            <span>Found Accounting</span>
+            <span className="semantics semantics--manual">
+              {accountingConnected ? 'CONNECTED' : 'NOT CONNECTED'}
+            </span>
+          </div>
+          <div className="grid grid--cards grid--compact">
               <StatCard
                 label="BTC Holdings"
                 source={DataSource.MANUAL}
-                value={formatBtc(treasury.btcHoldings)}
+                value={formatBtc(effectiveTreasury.btcHoldings)}
                 tone="btc"
               />
               <StatCard
                 label="BTC Market Value"
-                source={DataSource.MODELED}
-                value={formatUsdCompact(treasuryResult.currentValueUsd)}
-                hint={`@ ${formatUsd(market.btcPriceUsd)}`}
+                source={nav.sourced.btcMarketValue.source}
+                dependencies={nav.sourced.btcMarketValue.dependencies}
+                value={formatUsdCompact(nav.btcTreasuryMarketValueUsd)}
+                hint={`@ ${formatUsd(marketSnap.btcPriceUsd)}${
+                  marketSnap.priceUpdatedAt
+                    ? ` · ${new Date(marketSnap.priceUpdatedAt).toLocaleString()}`
+                    : ''
+                }`}
               />
               <StatCard
-                label="BTC Cost Basis"
+                label="BTC Avg Cost Basis"
                 source={DataSource.MANUAL}
-                value={formatUsdCompact(treasuryResult.costBasisUsd)}
+                value={
+                  nav.btcAverageCostBasisUsd > 0
+                    ? formatUsd(nav.btcAverageCostBasisUsd)
+                    : NOT_TRACKED
+                }
+                hint="Purchased BTC only · mined coins excluded"
               />
               <StatCard
                 label="Unrealized P/L"
-                source={DataSource.MODELED}
-                value={formatUsdCompact(treasuryResult.unrealizedPnlUsd)}
+                source={nav.sourced.unrealizedPnl.source}
+                dependencies={nav.sourced.unrealizedPnl.dependencies}
+                value={formatUsdCompact(nav.btcUnrealizedPnlUsd)}
                 hint={formatPercent(treasuryResult.unrealizedPnlPct)}
                 tone={
-                  treasuryResult.unrealizedPnlUsd >= 0
-                    ? 'positive'
-                    : 'negative'
+                  nav.btcUnrealizedPnlUsd >= 0 ? 'positive' : 'negative'
                 }
               />
               <StatCard
-                label="Cash Reserve"
+                label="Cash"
                 source={DataSource.MANUAL}
-                value={formatUsdCompact(treasuryResult.cashReserveUsd)}
+                value={formatUsdCompact(nav.cashUsd)}
               />
               <StatCard
                 label="Hardware Book Value"
                 source={DataSource.MANUAL}
-                value={formatUsdCompact(
-                  treasuryResult.minerHardwareBookValueUsd || hardwareBook,
-                )}
+                value={formatUsdCompact(nav.minerHardwareBookValueUsd)}
               />
               <StatCard
-                label="Forge NAV"
-                source={DataSource.MODELED}
-                value={formatUsdCompact(treasuryResult.forgeNavUsd)}
+                label="Other Assets"
+                source={DataSource.MANUAL}
+                value={formatUsdCompact(nav.otherAssetsUsd)}
+              />
+              <StatCard
+                label="Gross Assets"
+                source={DataSource.DERIVED}
+                value={formatUsdCompact(nav.grossAssetsUsd)}
+              />
+              <StatCard
+                label="Equipment Financing"
+                source={DataSource.MANUAL}
+                value={formatUsdCompact(nav.equipmentFinancingUsd)}
+              />
+              <StatCard
+                label="Hosting Payable"
+                source={DataSource.MANUAL}
+                value={formatUsdCompact(nav.hostingPayableUsd)}
+              />
+              <StatCard
+                label="Total Liabilities"
+                source={DataSource.MANUAL}
+                value={formatUsdCompact(nav.totalLiabilitiesUsd || liabilityTotal)}
+              />
+              <StatCard
+                label="Net Asset Value"
+                source={nav.sourced.nav.source}
+                dependencies={nav.sourced.nav.dependencies}
+                value={formatUsdCompact(nav.netAssetValueUsd)}
                 tone="btc"
               />
               <StatCard
-                label="BTC % of NAV"
-                source={DataSource.MODELED}
-                value={
-                  treasuryResult.btcPctOfNav == null
-                    ? '—'
-                    : formatPercent(treasuryResult.btcPctOfNav, 0)
-                }
-              />
-              <StatCard
-                label="Hardware % of NAV"
-                source={DataSource.MODELED}
-                value={
-                  treasuryResult.hardwarePctOfNav == null
-                    ? '—'
-                    : formatPercent(treasuryResult.hardwarePctOfNav, 0)
-                }
-              />
-              <StatCard
-                label="Cash % of NAV"
-                source={DataSource.MODELED}
-                value={
-                  treasuryResult.cashPctOfNav == null
-                    ? '—'
-                    : formatPercent(treasuryResult.cashPctOfNav, 0)
-                }
-              />
-              <StatCard
-                label="BTC Mined (tracked)"
+                label="BTC Produced Lifetime"
                 source={DataSource.MANUAL}
                 value={
-                  treasury.btcMined > 0
-                    ? formatBtc(treasury.btcMined)
+                  nav.btcProducedLifetime > 0
+                    ? formatBtc(nav.btcProducedLifetime)
+                    : NOT_TRACKED
+                }
+              />
+              <StatCard
+                label="BTC Purchased Lifetime"
+                source={DataSource.MANUAL}
+                value={
+                  nav.btcPurchasedLifetime > 0
+                    ? formatBtc(nav.btcPurchasedLifetime)
                     : NOT_TRACKED
                 }
               />
               <StatCard
                 label="Long-term Target"
                 source={DataSource.MANUAL}
-                value={formatBtc(treasury.targetBtc, 0)}
+                value={formatBtc(effectiveTreasury.targetBtc, 0)}
                 hint={`${formatPercent(treasuryResult.progressToTargetPct, 0)} reached`}
               />
-            </div>
-            <div className="panel">
-              <TreasuryEditor
-                key={treasury.updatedAt}
-                position={treasury}
-                onSave={saveTreasury}
-              />
-            </div>
           </div>
           <div className="panel treasury-chart">
             <div className="panel__head">
@@ -594,6 +970,35 @@ function App() {
         </Section>
 
         <Section id="fleet" title="Fleet operations">
+          {!demoMode && storedAssets.length === 0 && (
+            <p className="notice">
+              No Forge-owned miners are registered. Add miners in Data
+              management or enable Demo mode to inspect placeholder equipment.
+              Demo machines are never treated as owned inventory.
+            </p>
+          )}
+          <div className="grid grid--cards grid--compact">
+            <StatCard
+              label="Registered miners"
+              source={DataSource.MANUAL}
+              value={formatNumber(matchReport.registeredMiners)}
+            />
+            <StatCard
+              label="Braiins matched"
+              source={DataSource.LIVE}
+              value={formatNumber(matchReport.matchedWorkers)}
+            />
+            <StatCard
+              label="Unmatched Forge miners"
+              source={DataSource.DERIVED}
+              value={formatNumber(matchReport.unmatchedForgeMiners.length)}
+            />
+            <StatCard
+              label="Unmatched Braiins workers"
+              source={DataSource.LIVE}
+              value={formatNumber(matchReport.unmatchedBraiinsWorkers.length)}
+            />
+          </div>
           <FleetRegistry
             assets={assets}
             rows={rows}
@@ -602,12 +1007,18 @@ function App() {
             estimatedBtcPerDay={estimatedBtcPerDay}
             workers={pool.workers}
             demoMode={demoMode}
-            defaultElectricityRate={energy.avgElectricityRatePerKwh}
+            defaultElectricityRate={assumptions.defaultElectricityRatePerKwh}
             onDemoModeChange={changeDemoMode}
             onCreate={createAsset}
             onUpdate={updateAsset}
             onRemove={removeAsset}
             onToggleEnabled={toggleAsset}
+          />
+          <FleetCapital
+            totals={capitalTotals}
+            assets={demoMode ? assets : operatingAssets}
+            recovery={recovery}
+            demoMode={demoMode}
           />
         </Section>
 
@@ -617,15 +1028,15 @@ function App() {
               label="BTC Accumulated"
               source={DataSource.MANUAL}
               value={
-                treasury.btcMined > 0
-                  ? formatBtc(treasury.btcMined)
+                effectiveTreasury.btcMined > 0
+                  ? formatBtc(effectiveTreasury.btcMined)
                   : aggregate.btcEarned30d != null
                     ? formatBtc(aggregate.btcEarned30d)
                     : NOT_TRACKED
               }
               hint={
-                treasury.btcMined > 0
-                  ? 'Manual treasury ledger'
+                effectiveTreasury.btcMined > 0
+                  ? 'Owner ledger'
                   : aggregate.btcEarned30d != null
                     ? 'Pool 30d rewards (proxy)'
                     : undefined
@@ -746,11 +1157,11 @@ function App() {
               source={DataSource.MODELED}
               value={
                 hardwareBook > 0 &&
-                market.btcPriceUsd > 0 &&
+                marketSnap.btcPriceUsd > 0 &&
                 aggregate.estimatedMonthlyBtc > 0
                   ? formatPercent(
                       (aggregate.estimatedMonthlyBtc * 12) /
-                        (hardwareBook / market.btcPriceUsd),
+                        (hardwareBook / marketSnap.btcPriceUsd),
                       0,
                     )
                   : NOT_TRACKED
@@ -758,6 +1169,123 @@ function App() {
             />
           </div>
 
+          <div className="grid grid--cards grid--compact">
+            <StatCard
+              label="Network Hashrate"
+              source={marketSnap.networkSource}
+              value={`${marketSnap.networkHashrateEhs.toFixed(1)} EH/s`}
+              hint={
+                marketSnap.fetchedAt
+                  ? `Updated ${new Date(marketSnap.fetchedAt).toLocaleString()}`
+                  : 'MODELED assumption'
+              }
+            />
+            <StatCard
+              label="Difficulty"
+              source={marketSnap.networkSource}
+              value={
+                marketSnap.difficulty == null
+                  ? NOT_TRACKED
+                  : formatNumber(marketSnap.difficulty)
+              }
+            />
+            <StatCard
+              label="Block Height"
+              source={marketSnap.networkSource}
+              value={
+                marketSnap.blockHeight == null
+                  ? NOT_TRACKED
+                  : formatNumber(marketSnap.blockHeight)
+              }
+            />
+            <StatCard
+              label="Block Subsidy"
+              source={
+                marketSnap.blockHeight != null
+                  ? DataSource.DERIVED
+                  : DataSource.MODELED
+              }
+              value={formatBtc(marketSnap.blockSubsidyBtc, 3)}
+            />
+            <StatCard
+              label="Days to Adjustment"
+              source={marketSnap.networkSource}
+              value={
+                marketSnap.daysUntilAdjustment == null
+                  ? NOT_TRACKED
+                  : `${marketSnap.daysUntilAdjustment.toFixed(1)}d`
+              }
+              hint={
+                marketSnap.nextDifficultyChangePct == null
+                  ? undefined
+                  : `${marketSnap.nextDifficultyChangePct.toFixed(2)}% est.`
+              }
+            />
+            <StatCard
+              label="BTC Spot"
+              source={marketSnap.btcPriceSource}
+              value={formatUsd(marketSnap.btcPriceUsd)}
+              hint={
+                marketSnap.change24hPct == null
+                  ? marketSnap.priceProvider
+                  : `${marketSnap.change24hPct >= 0 ? '+' : ''}${marketSnap.change24hPct.toFixed(2)}% 24h · ${marketSnap.priceProvider}`
+              }
+              tone="btc"
+            />
+          </div>
+          {unitEconomics.length > 0 && (
+            <div className="panel panel--table">
+              <div className="panel__head panel__head--padded">
+                <div>
+                  <h3>Miner unit economics</h3>
+                  <span className="panel__meta">MODELED · live market/network when available</span>
+                </div>
+              </div>
+              <div className="table-wrap">
+                <table className="fleet-table">
+                  <thead>
+                    <tr>
+                      <th>Miner</th>
+                      <th className="num">BTC/day</th>
+                      <th className="num">Rev/day</th>
+                      <th className="num">Power/day</th>
+                      <th className="num">Host/day</th>
+                      <th className="num">Margin</th>
+                      <th className="num">BE BTC</th>
+                      <th className="num">BE $/kWh</th>
+                      <th className="num">Payback</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unitEconomics.map(({ asset, economics }) => (
+                      <tr key={asset.id}>
+                        <td>
+                          {asset.model}
+                          <span className="cell-sub">{asset.serialNumber}</span>
+                        </td>
+                        <td className="num">{formatBtc(economics.expectedBtcPerDay, 4)}</td>
+                        <td className="num">{formatUsdCompact(economics.usdRevenuePerDay)}</td>
+                        <td className="num">{formatUsdCompact(economics.electricityPerDay)}</td>
+                        <td className="num">{formatUsdCompact(economics.hostingPerDay)}</td>
+                        <td className="num">{formatPercent(economics.miningMarginPct)}</td>
+                        <td className="num">{formatUsdCompact(economics.breakevenBtcPrice)}</td>
+                        <td className="num">
+                          {economics.breakevenElectricityRate == null
+                            ? '—'
+                            : `$${economics.breakevenElectricityRate.toFixed(3)}`}
+                        </td>
+                        <td className="num">
+                          {economics.estimatedHardwarePaybackMonths == null
+                            ? '—'
+                            : `${economics.estimatedHardwarePaybackMonths.toFixed(1)} mo`}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
           <WorkersPanel
             workers={pool.workers}
             configured={pool.configured}
@@ -783,15 +1311,15 @@ function App() {
           <div className="grid grid--cards grid--compact">
             <StatCard
               label="Available Power"
-              source={DataSource.MODELED}
-              value={formatMw(energy.availableMw)}
-              hint="Plan"
+              source={facilities.length ? DataSource.MANUAL : DataSource.MODELED}
+              value={formatMw(facilityAgg.contractedMW || energy.availableMw)}
+              hint={facilities.length ? 'Facility ledger' : 'Plan'}
             />
             <StatCard
               label="Deployed Power"
-              source={DataSource.MODELED}
-              value={formatMw(energy.deployedMw)}
-              hint="Plan"
+              source={facilities.length ? DataSource.MANUAL : DataSource.MODELED}
+              value={formatMw(facilityAgg.deployedMW || energy.deployedMw)}
+              hint={facilities.length ? 'Facility ledger' : 'Plan'}
             />
             <StatCard
               label="Avg Electricity Rate"
@@ -849,9 +1377,47 @@ function App() {
           </div>
         </Section>
 
-        <Section id="capital" title="Capital allocation · plan">
-          <div className="panel panel--center">
-            <AllocationChart slices={[...capitalAllocation]} />
+        <Section id="capital" title="Capital allocation">
+          <div className="panel">
+            <div className="panel__head">
+              <h3>Current vs target</h3>
+              <span className="panel__meta">
+                Current from Forge asset values · targets MANUAL
+              </span>
+            </div>
+            <div className="split">
+              <AllocationChart slices={allocationSlices} />
+              <table className="fleet-table">
+                <thead>
+                  <tr>
+                    <th>Bucket</th>
+                    <th className="num">Current</th>
+                    <th className="num">Share</th>
+                    <th className="num">Target</th>
+                    <th className="num">Variance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {allocation.map((row) => (
+                    <tr key={row.bucket}>
+                      <td>{row.label}</td>
+                      <td className="num">{formatUsdCompact(row.currentUsd)}</td>
+                      <td className="num">
+                        {row.currentPct == null ? '—' : formatPercent(row.currentPct, 0)}
+                      </td>
+                      <td className="num">
+                        {row.targetPct == null ? '—' : formatPercent(row.targetPct, 0)}
+                      </td>
+                      <td className="num">
+                        {row.variancePct == null
+                          ? '—'
+                          : formatPercent(row.variancePct, 0)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
         </Section>
 
@@ -886,12 +1452,39 @@ function App() {
             </div>
           </div>
         </Section>
+
+        <Section id="data" title="Data management">
+          <DataManagement
+            demoMode={demoMode}
+            assets={operatingAssets}
+            workers={pool.workers}
+            transactions={transactions}
+            facilities={facilities}
+            liabilities={liabilities}
+            assumptions={assumptions}
+            allocationTargets={allocationTargets}
+            treasury={treasury}
+            onCreateAsset={createAsset}
+            onUpdateAsset={updateAsset}
+            onRemoveAsset={removeAsset}
+            onAppendTx={appendTx}
+            onRemoveTx={removeTx}
+            onCreateFacility={createFacility}
+            onUpdateFacility={updateFacility}
+            onRemoveFacility={removeFacility}
+            onCreateLiability={createLiability}
+            onRemoveLiability={removeLiability}
+            onSaveAssumptions={saveAssumptions}
+            onSaveAllocation={saveAllocation}
+            onSaveTreasury={saveTreasury}
+          />
+        </Section>
       </main>
 
       <footer className="footer">
         <span>© {new Date().getFullYear()} Forge Energy &amp; Compute</span>
         <span className="footer__note">
-          v1.1 live operations · LIVE / MANUAL / MODELED
+          v1.2 live data + owner ledger · LIVE / MANUAL / MODELED / DERIVED
         </span>
       </footer>
     </div>

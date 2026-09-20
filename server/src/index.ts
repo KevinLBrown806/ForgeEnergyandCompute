@@ -20,7 +20,7 @@ applySecurity(app);
 app.get('/', (_req, res) => {
   res.json({
     service: 'forge-api',
-    docs: 'GET /api/health, /api/auth/session, /api/mining/summary, /api/braiins/*',
+    docs: 'GET /api/health, /api/market/snapshot, /api/network/snapshot, /api/auth/session, /api/mining/summary, /api/braiins/*',
   });
 });
 

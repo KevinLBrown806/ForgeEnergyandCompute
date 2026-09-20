@@ -39,6 +39,8 @@ export function WorkersPanel({
               <th className="num">60m</th>
               <th className="num">24h</th>
               <th className="num">Shares · 24h</th>
+              <th className="num">Rejected</th>
+              <th className="num">Stale</th>
               <th>Last share</th>
             </tr>
           </thead>
@@ -55,6 +57,16 @@ export function WorkersPanel({
                 <td className="num">{formatHashrate(worker.hashRate60mTh)}</td>
                 <td className="num">{formatHashrate(worker.hashRate24hTh)}</td>
                 <td className="num">{formatNumber(worker.shares24h)}</td>
+                <td className="num">
+                  {worker.rejectedShares24h == null
+                    ? '—'
+                    : formatNumber(worker.rejectedShares24h)}
+                </td>
+                <td className="num">
+                  {worker.staleShares24h == null
+                    ? '—'
+                    : formatNumber(worker.staleShares24h)}
+                </td>
                 <td>
                   {worker.lastShareAt
                     ? new Date(worker.lastShareAt).toLocaleString()
@@ -64,7 +76,7 @@ export function WorkersPanel({
             ))}
             {workers.length === 0 && (
               <tr>
-                <td className="empty-state" colSpan={7}>
+                <td className="empty-state" colSpan={9}>
                   No worker telemetry available.
                 </td>
               </tr>
