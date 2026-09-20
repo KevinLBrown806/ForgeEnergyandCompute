@@ -312,7 +312,7 @@ function App() {
   }, []);
 
   const assets = demoMode ? DEMO_FLEET : storedAssets;
-  const operatingAssets = demoMode ? [] : storedAssets;
+  const operatingAssets = storedAssets;
   const rows = useMemo(
     () =>
       buildFleetRows({
@@ -343,14 +343,44 @@ function App() {
       }),
     [pool.account, pool.payouts, pool.rewards, rows],
   );
+  const ownerRows = useMemo(
+    () =>
+      buildFleetRows({
+        assets: operatingAssets,
+        workers: pool.workers,
+        btcPerThPerDay: btcPerThDay,
+        btcPriceUsd: marketSnap.btcPriceUsd,
+        poolFeePct: assumptions.poolFeePct,
+        defaultElectricityRatePerKwh: assumptions.defaultElectricityRatePerKwh,
+      }),
+    [
+      operatingAssets,
+      assumptions.defaultElectricityRatePerKwh,
+      assumptions.poolFeePct,
+      marketSnap.btcPriceUsd,
+      pool.workers,
+      btcPerThDay,
+    ],
+  );
+  const ownerAggregate = useMemo(
+    () =>
+      aggregateFleet({
+        rows: ownerRows,
+        rewards: pool.rewards,
+        payouts: pool.payouts,
+        unpaidBalanceBtc: pool.account?.currentBalanceBtc ?? null,
+        btcEarnedToday: pool.account?.todayRewardBtc ?? null,
+      }),
+    [ownerRows, pool.account, pool.payouts, pool.rewards],
+  );
   const exceptions = useMemo(
     () =>
       buildFleetExceptions({
-        rows,
+        rows: ownerRows,
         workers: pool.workers,
         efficiencyTargetJTh: assumptions.efficiencyTargetJTh,
       }),
-    [assumptions.efficiencyTargetJTh, pool.workers, rows],
+    [assumptions.efficiencyTargetJTh, ownerRows, pool.workers],
   );
   const matchReport = useMemo(
     () => matchFleetWorkers(assets, pool.workers),
@@ -415,18 +445,18 @@ function App() {
     capitalTotals.estimatedHardwareBookValueUsd ??
     treasury.minerHardwareBookValueUsd;
   const fleetHardwareRoi = simpleHardwareRoiAnnual(
-    aggregate.miningContributionMonthlyUsd,
+    ownerAggregate.miningContributionMonthlyUsd,
     hardwareBook,
   );
 
   const costPerBtc = costToMineOneBtcUsd(
-    aggregate.operatingExpensesMonthlyUsd,
-    aggregate.estimatedMonthlyBtc,
+    ownerAggregate.operatingExpensesMonthlyUsd,
+    ownerAggregate.estimatedMonthlyBtc,
   );
 
   /** BTC MTD: prefer LIVE pool rewards; otherwise MODELED estimate. */
-  const btcMinedMtdLive = aggregate.btcEarned30d;
-  const btcMinedMtdModeled = aggregate.estimatedMonthlyBtc;
+  const btcMinedMtdLive = ownerAggregate.btcEarned30d;
+  const btcMinedMtdModeled = ownerAggregate.estimatedMonthlyBtc;
   const hasLiveMtd = btcMinedMtdLive != null;
 
   const minerLoadMw = fleetPowerKw / 1000;
@@ -482,11 +512,11 @@ function App() {
         ? DataSource.MANUAL
         : DataSource.MODELED,
     operatingHashrateTh:
-      aggregate.currentHashrateTh || aggregate.expectedHashrateTh,
+      ownerAggregate.currentHashrateTh || ownerAggregate.expectedHashrateTh,
     hashrateSource:
-      aggregate.currentHashrateTh > 0 ? DataSource.LIVE : DataSource.MANUAL,
-    miningRevenueUsd: aggregate.grossMiningRevenueMonthlyUsd,
-    miningOperatingCostUsd: aggregate.operatingExpensesMonthlyUsd,
+      ownerAggregate.currentHashrateTh > 0 ? DataSource.LIVE : DataSource.MANUAL,
+    miningRevenueUsd: ownerAggregate.grossMiningRevenueMonthlyUsd,
+    miningOperatingCostUsd: ownerAggregate.operatingExpensesMonthlyUsd,
     fleetBookValueUsd: hardwareBook,
     deployedCapitalUsd: capitalTotals.totalDeployedCapitalUsd,
     btcPriceSource: marketSnap.btcPriceSource,
@@ -689,8 +719,8 @@ function App() {
               source={ownerKpis.operatingHashrateTh.source}
               value={formatHashrate(ownerKpis.operatingHashrateTh.value)}
               hint={
-                aggregate.currentHashrateTh > 0
-                  ? `${formatHashrate(aggregate.expectedHashrateTh)} expected`
+                ownerAggregate.currentHashrateTh > 0
+                  ? `${formatHashrate(ownerAggregate.expectedHashrateTh)} expected`
                   : 'Nominal from registry'
               }
             />
@@ -698,23 +728,23 @@ function App() {
               label="Mining Revenue"
               source={ownerKpis.miningRevenueUsd.source}
               dependencies={ownerKpis.miningRevenueUsd.dependencies}
-              value={formatUsdCompact(aggregate.grossMiningRevenueMonthlyUsd)}
+              value={formatUsdCompact(ownerAggregate.grossMiningRevenueMonthlyUsd)}
               hint="Modeled monthly · not settled"
             />
             <StatCard
               label="Mining Operating Cost"
               source={ownerKpis.miningOperatingCostUsd.source}
               dependencies={ownerKpis.miningOperatingCostUsd.dependencies}
-              value={formatUsdCompact(aggregate.operatingExpensesMonthlyUsd)}
+              value={formatUsdCompact(ownerAggregate.operatingExpensesMonthlyUsd)}
             />
             <StatCard
               label="Mining Operating Profit"
               source={ownerKpis.miningOperatingProfitUsd.source}
               dependencies={ownerKpis.miningOperatingProfitUsd.dependencies}
-              value={formatUsdCompact(aggregate.miningContributionMonthlyUsd)}
+              value={formatUsdCompact(ownerAggregate.miningContributionMonthlyUsd)}
               hint="Modeled contribution · not settled P&amp;L"
               tone={
-                aggregate.miningContributionMonthlyUsd >= 0
+                ownerAggregate.miningContributionMonthlyUsd >= 0
                   ? 'positive'
                   : 'negative'
               }
@@ -752,15 +782,15 @@ function App() {
             <StatCard
               label="Online Miners"
               source={DataSource.LIVE}
-              value={formatNumber(aggregate.onlineMiners)}
-              hint={`${aggregate.degradedMiners} degraded · ${aggregate.offlineMiners} offline`}
-              tone={aggregate.offlineMiners ? 'negative' : 'positive'}
+              value={formatNumber(ownerAggregate.onlineMiners)}
+              hint={`${ownerAggregate.degradedMiners} degraded · ${ownerAggregate.offlineMiners} offline`}
+              tone={ownerAggregate.offlineMiners ? 'negative' : 'positive'}
             />
             <StatCard
               label="Registered Miners"
               source={DataSource.MANUAL}
-              value={formatNumber(aggregate.registeredMiners)}
-              hint={`${aggregate.enabledMiners} enabled`}
+              value={formatNumber(ownerAggregate.registeredMiners)}
+              hint={`${ownerAggregate.enabledMiners} enabled`}
             />
             <StatCard
               label="BTC Earned Today"
@@ -785,9 +815,9 @@ function App() {
               label="Fleet Efficiency"
               source={DataSource.MODELED}
               value={
-                aggregate.fleetEfficiencyPct == null
+                ownerAggregate.fleetEfficiencyPct == null
                   ? '—'
-                  : formatPercent(aggregate.fleetEfficiencyPct)
+                  : formatPercent(ownerAggregate.fleetEfficiencyPct)
               }
               hint="5m hashrate / nominal"
             />
